@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tgz
+.git/
+.husky/_/
+.playwright-mcp/
+logs/
+*.log
+.env
+.env.*
+docs/
+pnpm-lock.yaml

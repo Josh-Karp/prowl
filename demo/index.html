@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Customer registration</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: #f3f5f8;
+        color: #172033;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        width: min(100% - 32px, 760px);
+        margin: 40px auto;
+        padding: 32px;
+        background: white;
+        border: 1px solid #dce1e8;
+        border-radius: 16px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        line-height: 1.2;
+      }
+      p,
+      .hint {
+        color: #526077;
+      }
+      fieldset {
+        margin: 24px 0 0;
+        padding: 20px;
+        border: 1px solid #dce1e8;
+        border-radius: 8px;
+        min-width: 0;
+      }
+      legend {
+        padding: 0 8px;
+        font-weight: 700;
+      }
+      label {
+        display: block;
+        margin-top: 16px;
+        font-weight: 600;
+      }
+      input,
+      select,
+      textarea {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        padding: 10px;
+        border: 1px solid #a6b1c2;
+        border-radius: 6px;
+        font: inherit;
+      }
+      textarea {
+        resize: vertical;
+      }
+      input[type="radio"],
+      input[type="checkbox"] {
+        display: inline-block;
+        width: auto;
+        margin: 0 8px 0 0;
+        accent-color: #245ac7;
+      }
+      input[type="range"] {
+        padding: 0;
+        accent-color: #245ac7;
+      }
+      input[type="color"] {
+        width: 80px;
+        height: 44px;
+        padding: 4px;
+      }
+      .choice {
+        font-weight: 400;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0 20px;
+      }
+      .hint {
+        display: block;
+        margin-top: 4px;
+        font-size: 14px;
+      }
+      :is(input, select, textarea, button):focus-visible {
+        outline: 3px solid #80b1ff;
+        outline-offset: 3px;
+      }
+      button {
+        width: 100%;
+        margin-top: 24px;
+        padding: 12px;
+        border: 0;
+        border-radius: 6px;
+        background: #245ac7;
+        color: white;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #1c469c;
+      }
+      #result:not(:empty) {
+        margin-top: 24px;
+        padding: 16px;
+        border-radius: 6px;
+        background: #e8f5ec;
+        color: #205932;
+        overflow-wrap: anywhere;
+      }
+      #result.error {
+        background: #fcebec;
+        color: #8b2430;
+      }
+      .note {
+        margin-bottom: 0;
+        font-size: 14px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 560px) {
+        main {
+          margin: 24px auto;
+          padding: 20px;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+        fieldset {
+          padding: 16px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Customer registration</h1>
+      <p>
+        Create a customer with varied details and preferences. Fields marked *
+        are required.
+      </p>
+      <form id="registration-form">
+        <fieldset>
+          <legend>Customer details</legend>
+          <div class="grid">
+            <div>
+              <label for="first-name">First name *</label>
+              <input
+                id="first-name"
+                name="firstName"
+                autocomplete="given-name"
+                required
+                maxlength="100"
+                pattern=".*\S.*"
+                title="Enter a first name containing at least one non-space character."
+              />
+            </div>
+            <div>
+              <label for="last-name">Last name *</label>
+              <input
+                id="last-name"
+                name="lastName"
+                autocomplete="family-name"
+                required
+                maxlength="100"
+                pattern=".*\S.*"
+                title="Enter a last name containing at least one non-space character."
+              />
+            </div>
+          </div>
+          <label for="email">Email *</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            required
+            maxlength="254"
+          />
+          <label for="phone">Phone</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            autocomplete="tel"
+            pattern="\+?[0-9 \(\)\-]{7,20}"
+            aria-describedby="phone-hint"
+          />
+          <small id="phone-hint" class="hint"
+            >Required when phone is your preferred contact method. Use 7–20
+            digits, spaces, parentheses or hyphens, with an optional leading
+            +.</small
+          >
+          <label for="website">Website (optional)</label>
+          <input
+            id="website"
+            name="website"
+            type="url"
+            placeholder="https://example.com"
+          />
+          <label for="birth-date">Date of birth (optional)</label>
+          <input
+            id="birth-date"
+            name="dateOfBirth"
+            type="date"
+            min="1900-01-01"
+          />
+          <label for="customer-type">Customer type *</label>
+          <select id="customer-type" name="customerType" required>
+            <option value="">Choose a customer type</option>
+            <option value="individual">Individual</option>
+            <option value="business">Business</option>
+          </select>
+          <div id="company-field" hidden>
+            <label for="company">Company name *</label>
+            <input
+              id="company"
+              name="company"
+              autocomplete="organization"
+              maxlength="120"
+              pattern=".*\S.*"
+              disabled
+            />
+          </div>
+          <div class="grid">
+            <div>
+              <label for="country">Country *</label>
+              <select
+                id="country"
+                name="country"
+                autocomplete="country"
+                required
+              >
+                <option value="">Choose a country</option>
+                <option value="ZA">South Africa</option>
+                <option value="GB">United Kingdom</option>
+                <option value="US">United States</option>
+                <option value="AU">Australia</option>
+              </select>
+            </div>
+            <div>
+              <label for="household-size">Household size *</label>
+              <input
+                id="household-size"
+                name="householdSize"
+                type="number"
+                min="1"
+                max="12"
+                step="1"
+                value="1"
+                required
+              />
+            </div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <legend>Preferred contact method *</legend>
+          <label class="choice"
+            ><input name="contactMethod" type="radio" value="email" required />
+            Email</label
+          >
+          <label class="choice"
+            ><input name="contactMethod" type="radio" value="phone" required />
+            Phone</label
+          >
+        </fieldset>
+        <fieldset>
+          <legend>Interests and preferences</legend>
+          <label class="choice"
+            ><input name="interests" type="checkbox" value="technology" />
+            Technology</label
+          >
+          <label class="choice"
+            ><input name="interests" type="checkbox" value="travel" />
+            Travel</label
+          >
+          <label class="choice"
+            ><input name="interests" type="checkbox" value="wellness" /> Health
+            and wellness</label
+          >
+          <label class="choice"
+            ><input name="newsletter" type="checkbox" /> Receive the monthly
+            newsletter</label
+          >
+          <label for="satisfaction">Current satisfaction (0–10)</label>
+          <input
+            id="satisfaction"
+            name="satisfaction"
+            type="range"
+            min="0"
+            max="10"
+            step="1"
+            value="5"
+          />
+          <label for="favorite-color">Favorite color</label>
+          <input
+            id="favorite-color"
+            name="favoriteColor"
+            type="color"
+            value="#245ac7"
+          />
+          <label for="notes">Additional notes (optional)</label>
+          <textarea id="notes" name="notes" rows="3" maxlength="500"></textarea>
+          <label for="document">Supporting document (optional)</label>
+          <input
+            id="document"
+            name="document"
+            type="file"
+            accept=".pdf,.txt,.png,.jpg,.jpeg"
+            aria-describedby="document-hint"
+          />
+          <small id="document-hint" class="hint"
+            >Attach a PDF, text file or image. Only its filename, size and type
+            are saved.</small
+          >
+        </fieldset>
+        <label class="choice"
+          ><input name="terms" type="checkbox" required /> I agree to the
+          registration terms *</label
+        >
+        <button type="submit">Register customer</button>
+      </form>
+      <div
+        id="result"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
+      <p class="note">
+        Development demo. The latest customer is saved in this browser only.
+      </p>
+    </main>
+    <script>
+      const form = document.querySelector("#registration-form");
+      const result = document.querySelector("#result");
+      const customerType = document.querySelector("#customer-type");
+      const company = document.querySelector("#company");
+      const phone = document.querySelector("#phone");
+      const today = new Date();
+      document.querySelector("#birth-date").max = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      form.addEventListener("input", () => {
+        result.textContent = "";
+        result.className = "";
+      });
+      form.addEventListener("change", () => {
+        const business = customerType.value === "business";
+        document.querySelector("#company-field").hidden = !business;
+        company.disabled = !business;
+        company.required = business;
+        phone.required = form.elements.contactMethod.value === "phone";
+        result.textContent = "";
+        result.className = "";
+      });
+
+      form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        const values = new FormData(form);
+        const documentFile = values.get("document");
+        const customer = {
+          ...Object.fromEntries(values),
+          firstName: values.get("firstName").trim(),
+          lastName: values.get("lastName").trim(),
+          email: values.get("email").trim(),
+          householdSize: Number(values.get("householdSize")),
+          satisfaction: Number(values.get("satisfaction")),
+          interests: values.getAll("interests"),
+          newsletter: values.has("newsletter"),
+          terms: values.has("terms"),
+          document: documentFile?.name
+            ? {
+                name: documentFile.name,
+                size: documentFile.size,
+                type: documentFile.type,
+              }
+            : null,
+        };
+
+        try {
+          customer.reference = `DEMO-${crypto.randomUUID()}`;
+          localStorage.setItem("demo.customer", JSON.stringify(customer));
+          result.className = "";
+          result.textContent = `Customer registered successfully: ${customer.firstName} ${customer.lastName} (${customer.email}). Reference ID: ${customer.reference}`;
+        } catch {
+          result.className = "error";
+          result.textContent =
+            "Customer registration failed. Allow browser storage and try again.";
+        }
+      });
+    </script>
+  </body>
+</html>

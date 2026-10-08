@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    ignore:
+      # Keep TypeScript within typescript-eslint's supported range.
+      - dependency-name: "typescript"
+        versions: [">=6.1.0"]
