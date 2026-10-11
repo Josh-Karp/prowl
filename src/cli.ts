@@ -21,6 +21,14 @@ program
     "--max-iterations <count>",
     "Agent iteration limit (defaults to MAX_ITERATIONS or 30)",
   )
+  .option(
+    "--context-mode <mode>",
+    "Browser context: auto (default) or full; overrides PROWL_CONTEXT_MODE",
+  )
+  .option(
+    "--history-bytes <bytes>",
+    "Automatic history budget; defaults to PROWL_HISTORY_BYTES or twice OLLAMA_NUM_CTX",
+  )
   .option("--verbose", "Print detailed logs to the console")
   .option(
     "--log-file <path>",

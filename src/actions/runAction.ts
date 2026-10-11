@@ -1,9 +1,13 @@
+import {
+  resolveContextOptions,
+  type ContextOptions,
+} from "../agent/context-options.js";
 import { connectPlaywright } from "../mcp/playwright.js";
 import { runAgent } from "../agent/loop.js";
 import { formTask } from "../agent/prompts.js";
 import { configureLogger, logger } from "../logger.js";
 
-interface RunActionOptions {
+interface RunActionOptions extends ContextOptions {
   url?: string;
   runs?: string | number;
   model?: string;
@@ -28,12 +32,13 @@ function _validateOptions(options: RunActionOptions) {
       throw new Error(`${name} must be a positive integer.`);
     }
   }
-  return { url, runs, maxIterations };
+  const context = resolveContextOptions(options);
+  return { url, runs, maxIterations, context };
 }
 
 export async function runAction(options: RunActionOptions) {
   configureLogger({ filePath: options.logFile, verbose: options.verbose });
-  const { url, runs, maxIterations } = _validateOptions(options);
+  const { url, runs, maxIterations, context } = _validateOptions(options);
   const task = formTask(url, runs, options.instructions);
 
   logger.info(`Logs: ${logger.filePath}\nConnecting to Playwright...`, {
@@ -41,7 +46,14 @@ export async function runAction(options: RunActionOptions) {
   });
   const { client } = await connectPlaywright();
   try {
-    await runAgent(client, task, options.model, options.baseUrl, maxIterations);
+    await runAgent(
+      client,
+      task,
+      options.model,
+      options.baseUrl,
+      maxIterations,
+      { contextMode: context.mode, historyBytes: context.historyBytes },
+    );
   } finally {
     await client.close();
   }

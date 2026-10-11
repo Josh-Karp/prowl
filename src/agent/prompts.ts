@@ -22,3 +22,10 @@ Verify each submission using the visible confirmation. Capture any reference/ID 
 Stop and report a blocker if a submission fails or its outcome is uncertain; do not submit it again.
 ${instructions}`;
 }
+
+export const automaticContext = `
+Large pages may be represented by a scoped snapshot plus native form metadata. Use current snapshot refs; metadata htmlType describes HTML and is not necessarily a tool's accepted type.
+browser_fill_form accepts textbox, checkbox, radio, combobox, or slider; use textbox for text/email/password/textarea. Use browser_type for numeric spinbuttons and inspect native date controls before choosing an action.
+Peripheral navigation, footer and sidebar guide content may be omitted. If a field, instruction, error, or target is ambiguous, call prowl_full_snapshot for a fresh complete page observation.
+Older complete turns may be replaced with deterministic history checkpoints. Use prowl_browser_history to retrieve original receipts or exact entered values. Historical refs are stale; refresh the browser snapshot before interacting.
+A requested action or an error-free tool call is not proof of submission. Verify visible confirmation, copy IDs verbatim, and never repeat an uncertain submission.`;

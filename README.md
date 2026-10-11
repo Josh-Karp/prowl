@@ -61,16 +61,18 @@ prowl run --url 'http://localhost:5173' \
   --max-iterations 30
 ```
 
-| CLI flag                   | Environment fallback | Default                           |
-| -------------------------- | -------------------- | --------------------------------- |
-| `--url <url>`              | —                    | `http://localhost:5173`           |
-| `--runs <count>`           | —                    | 1 submission                      |
-| `--instructions <text>`    | —                    | No additional instructions        |
-| `--model <name>`           | `OLLAMA_MODEL`       | `gemma4:12b`                      |
-| `--base-url <url>`         | `OLLAMA_BASE_URL`    | `http://localhost:11434`          |
-| `--max-iterations <count>` | `MAX_ITERATIONS`     | 30 iterations for the entire task |
-| `--log-file <path>`        | `LOG_FILE`           | `logs/prowl.log`                  |
-| `--verbose`                | —                    | Off                               |
+| CLI flag                   | Environment fallback  | Default                                    |
+| -------------------------- | --------------------- | ------------------------------------------ |
+| `--url <url>`              | —                     | `http://localhost:5173`                    |
+| `--runs <count>`           | —                     | 1 submission                               |
+| `--instructions <text>`    | —                     | No additional instructions                 |
+| `--model <name>`           | `OLLAMA_MODEL`        | `gemma4:12b`                               |
+| `--base-url <url>`         | `OLLAMA_BASE_URL`     | `http://localhost:11434`                   |
+| `--max-iterations <count>` | `MAX_ITERATIONS`      | 30 iterations for the entire task          |
+| `--log-file <path>`        | `LOG_FILE`            | `logs/prowl.log`                           |
+| `--context-mode <mode>`    | `PROWL_CONTEXT_MODE`  | `auto` (`full` preserves complete history) |
+| `--history-bytes <bytes>`  | `PROWL_HISTORY_BYTES` | Twice `OLLAMA_NUM_CTX`                     |
+| `--verbose`                | —                     | Off                                        |
 
 `--url`, `--runs`, and `--instructions` belong to `run`. The other options apply to the whole program and can also be supplied after `run`. Use `prowl --help` for global options and `prowl run --help` for the form options. URLs must use HTTP or HTTPS; runs and maximum iterations must be positive safe integers.
 
@@ -85,6 +87,18 @@ The timeout must be a positive integer no greater than 2147483647 milliseconds. 
 
 All requested submissions share one agent conversation and one iteration budget. Multi-run behavior and confirmation checks are instructions to the model. For uploads, provide a local file path through `--instructions`. The model is instructed to report missing information or an uncertain submission rather than inventing results or repeating that submission.
 
+## Browser context
+
+Automatic mode reduces large inline page snapshots when one native form can be identified safely. It combines a form-scoped accessibility snapshot with native field types, constraints, required states, current values, option values, and page instructions/feedback. Reduction requires an observation of at least 8 KiB and savings of at least 25% and 2 KiB. Small forms pass through. Sidebar guide articles, navigation and footer content may be omitted; ambiguous controls, custom widgets, frames, multiple forms, and unsupported MCP capabilities use a fresh complete snapshot. Explicit snapshot targets, depth, boxes and filenames are respected.
+
+Older complete conversation turns are archived and replaced with deterministic checkpoints without another model call. Completed thinking stays in logs and archives. The original task, latest browser observation, recent turns, current errors and literal confirmation evidence remain available. Compaction uses serialized message bytes and previous provider token usage (80% of the context window); bytes are a proxy rather than a token guarantee. Tool definitions also consume context. A protected current observation exceeding the budget is sent intact and produces a budget-exception event.
+
+The model can call `prowl_full_snapshot` for a fresh complete page or `prowl_browser_history` for archived evidence. Historical refs are marked stale. For troubleshooting, preserve the original behavior with:
+
+```bash
+prowl run --url 'http://localhost:5173' --context-mode full
+```
+
 ## Results and logs
 
 Normal console output shows the log path, connection and iteration progress, tool names, the final model report, and concise failures. `--verbose` also prints detailed model and tool data. Help does not create a log file.
@@ -92,6 +106,10 @@ Normal console output shows the log path, connection and iteration progress, too
 The process exits with code 0 when the model finishes without further tool calls, and code 1 for validation errors, uncaught runtime errors, or an exhausted iteration budget. A model can finish by reporting a blocker, so exit code 0 is not an assertion that the form passed. Read the final report and visible confirmation details to interpret the outcome. Tool-reported errors are returned to the model so it can choose its next action.
 
 Each invocation creates a separate JSON-lines log containing model responses, tool arguments and results, timings, and error details. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID, producing `logs/prowl-<timestamp>-<id>.log`. Multiple requested submissions share that invocation's file, and previous logs are retained. Files are created only when the first entry is written.
+
+Automatic runs save snapshot JSON and original conversation turns in `<unique-log-path>.artifacts/`, beside the invocation's log. These files contain browser/task data; add `*.artifacts/` to your project's ignore rules if logs are outside an already ignored directory. `history.jsonl` preserves original tool receipts and thinking; numbered snapshot files preserve unreduced observations collected by the context adapter. Full mode retains raw results in the log.
+
+Structured `Context event` log records (schema version 1) include effective configuration, reduction/fallback decisions, history compactions, budget exceptions, and inference request sizes. Ollama token counts, cached counts and duration fields are recorded when supplied; durations use the provider's nanoseconds. Missing provider metrics are omitted.
 
 Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` changes the base name to `./custom-<timestamp>-<id>.log`; `LOG_FILE` supplies the base filename when the flag is absent. This checkout ignores `logs/` and `*.log`. When using the installed CLI in another project, add the desired log paths to that project's `.gitignore`.
 
@@ -126,6 +144,7 @@ pnpm format:check          # Check Prettier formatting
 pnpm lint:fix              # Apply ESLint fixes
 pnpm format                # Format supported project files
 pnpm build                 # Recreate dist from src; exclude demo and tests
+pnpm test:context          # Opt-in native-form integration with real Playwright MCP
 pnpm test:package          # Pack and test an isolated installation
 pnpm clean                 # Delete logs/ and .playwright-mcp, retaining dist/tarballs
 ```

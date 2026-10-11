@@ -94,3 +94,45 @@ test("a stalled model request is aborted by the configured deadline", async () =
     else process.env.OLLAMA_TIMEOUT_MS = originalTimeout;
   }
 });
+
+test("returns the assistant unchanged and reports provider usage without inventing missing metrics", async (t) => {
+  const originalFetch = globalThis.fetch;
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+    configureLogger();
+  });
+  const directory = mkdtempSync(join(tmpdir(), "prowl-metrics-"));
+  configureLogger({ filePath: join(directory, "agent.log") });
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const message = {
+    role: "assistant",
+    content: "Done",
+    thinking: "Original thinking",
+  };
+  const usage = {
+    prompt_eval_count: 200,
+    prompt_eval_cached_count: 50,
+    prompt_eval_duration: 900000,
+    eval_count: 10,
+    eval_duration: 200000,
+    total_duration: 1200000,
+  };
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ message, ...usage }));
+  const metrics: Array<Record<string, unknown>> = [];
+  assert.deepEqual(
+    await chat([], [], "model", "http://localhost:11434", (value) =>
+      metrics.push(value),
+    ),
+    message,
+  );
+  assert.equal(metrics[0].prompt_eval_count, 200);
+  assert.equal(metrics[0].prompt_eval_cached_count, 50);
+  assert.ok(Number(metrics[0].requestBytes) > 0);
+  assert.match(readFileSync(logger.filePath, "utf8"), /Context event/);
+  globalThis.fetch = async () => new Response(JSON.stringify({ message }));
+  await chat([], undefined, "model", "http://localhost:11434", (value) =>
+    metrics.push(value),
+  );
+  assert.equal(Object.hasOwn(metrics[1], "prompt_eval_count"), false);
+});
