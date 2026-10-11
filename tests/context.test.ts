@@ -282,3 +282,54 @@ test("reduction preserves action receipts, console messages, annotations and oth
   assert.deepEqual(result.receipt, { requestId: "exact-request" });
   assert.doesNotMatch(JSON.stringify(result), /Useful guide information/);
 });
+
+test("fresh fallback preserves original action receipts and refresh diagnostics without stale snapshots", async () => {
+  const original = {
+    ...full,
+    receipt: { requestId: "keep-request" },
+    content: [
+      {
+        ...full.content[0],
+        annotations: { audience: ["assistant"] },
+        text:
+          "### Ran Playwright code\nawait page.click();\n" +
+          full.content[0].text +
+          "\n### New console messages\nPOST rejected",
+      },
+      { type: "text", text: "Action-specific diagnostic" },
+    ],
+  };
+  const fresh = page('- textbox "Fresh field" [ref=e99]');
+  fresh.content.push({ type: "text", text: "Refresh-specific diagnostic" });
+  const context = new BrowserContext(
+    {
+      callTool: async ({ name }) =>
+        name === "browser_evaluate"
+          ? textResult('### Result\n{"fallback":"custom widget"}')
+          : fresh,
+    },
+    capabilities,
+  );
+  const result = await context.reduce(
+    "browser_click",
+    { target: "e3" },
+    original,
+  );
+  const serialized = JSON.stringify(result);
+  for (const value of [
+    "POST rejected",
+    "await page.click",
+    "Action-specific diagnostic",
+    "Refresh-specific diagnostic",
+    "e99",
+  ])
+    assert.ok(serialized.includes(value));
+  assert.doesNotMatch(serialized, /Useful guide information/);
+  assert.doesNotMatch(serialized, /textbox \\"Name/);
+  assert.deepEqual(result.receipt, original.receipt);
+  assert.ok(
+    (result.content as Array<{ annotations?: unknown }>).some(
+      (item) => !!item.annotations,
+    ),
+  );
+});

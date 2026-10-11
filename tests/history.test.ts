@@ -130,3 +130,61 @@ test("rejects partial or mispaired turns, keeps no-calls final messages, and rej
   assert.equal(h.prepare().at(-1)?.content, "Report");
   assert.throws(() => h.retrieve({ turnId: 99 }), /Unknown/);
 });
+
+test("large archived arguments do not grow the checkpoint or prevent removing other eligible turns", () => {
+  const events: Array<{
+    kind: string;
+    beforeBytes: number;
+    afterBytes: number;
+  }> = [];
+  const h = new ConversationHistory(prefix, 4000, 16384, (event) =>
+    events.push(event),
+  );
+  h.appendTurn([
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          function: {
+            name: "browser_type",
+            arguments: { target: "e1", text: "x".repeat(6000) },
+          },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      tool_name: "browser_type",
+      content: '{"content":[{"type":"text","text":"Entered exact value"}]}',
+    },
+  ]);
+  for (let id = 2; id <= 5; id++)
+    h.appendTurn([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [
+          {
+            function: {
+              name: "browser_click",
+              arguments: { target: `e${id}` },
+            },
+          },
+        ],
+      },
+      {
+        role: "tool",
+        tool_name: "browser_click",
+        content: '{"content":[{"type":"text","text":"Click receipt"}]}',
+      },
+    ]);
+  const messages = h.prepare();
+  assert.ok(Buffer.byteLength(JSON.stringify(messages)) <= 2000);
+  assert.ok(events.every((event) => event.kind !== "budget-exception"));
+  assert.ok(!JSON.stringify(messages).includes("x".repeat(6000)));
+  assert.match(
+    JSON.stringify(h.retrieve({ turnId: 1 })),
+    new RegExp("x".repeat(6000)),
+  );
+});

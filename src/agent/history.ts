@@ -158,34 +158,39 @@ export class ConversationHistory {
     );
     if (latestError) protectedIds.add(latestError.id);
     const removed: Turn[] = [];
-    for (const turn of [...this.turns]) {
+    let remaining = [...this.turns];
+    let replacement = this.checkpointMessages;
+    let candidate: Record<string, unknown> | undefined;
+    const version = this.version + 1;
+    for (const turn of this.turns) {
       if (protectedIds.has(turn.id)) continue;
       removed.push(turn);
-      this.turns = this.turns.filter((candidate) => candidate.id !== turn.id);
-      if (size(this.messages()) <= this.budget / 2) break;
-    }
-    if (removed.length) {
-      this.version++;
-      const live = new Set(this.turns.map((turn) => turn.id));
+      remaining = remaining.filter((value) => value.id !== turn.id);
+      const live = new Set(remaining.map((value) => value.id));
       const archived = [...this.archive.keys()].filter((id) => !live.has(id));
-      const checkpoint: Record<string, unknown> = {
+      const ranges: Array<[number, number]> = [];
+      for (const id of archived) {
+        const last = ranges[ranges.length - 1];
+        if (last && last[1] + 1 === id) last[1] = id;
+        else ranges.push([id, id]);
+      }
+      candidate = {
         notice,
-        checkpoint: this.version,
-        archivedTurns: archived,
+        checkpoint: version,
+        archivedTurns: { count: archived.length, ranges },
         literalConfirmationEvidence: this.evidence,
-        recentArchivedReceipts: removed.slice(-2).map((turn) => ({
-          turnId: turn.id,
-          requestedActions: turn.messages[0].tool_calls?.map(
-            (call) => call.function,
-          ),
-          results: turn.messages.slice(1).map((message) => ({
-            tool: message.tool_name,
-            evidence: `Retrieve turn ${turn.id} for the exact execution receipt.`,
+        recentArchivedReceipts: removed.slice(-2).map((value) => ({
+          turnId: value.id,
+          requestedActions: value.messages[0].tool_calls?.map((call) => ({
+            name: call.function.name,
           })),
+          results: value.messages
+            .slice(1)
+            .map((message) => ({ tool: message.tool_name })),
+          evidence: `Retrieve turn ${value.id} for exact arguments and execution receipts.`,
         })),
       };
-      this.checkpoints.set(this.version, checkpoint);
-      this.checkpointMessages = [
+      replacement = [
         {
           role: "assistant",
           content: "",
@@ -193,7 +198,7 @@ export class ConversationHistory {
             {
               function: {
                 name: "prowl_browser_history",
-                arguments: { checkpoint: this.version },
+                arguments: { checkpoint: version },
               },
             },
           ],
@@ -201,14 +206,30 @@ export class ConversationHistory {
         {
           role: "tool",
           tool_name: "prowl_browser_history",
-          content: JSON.stringify(checkpoint),
+          content: JSON.stringify(candidate),
         },
       ];
+      // Size the actual replacement, not the checkpoint being removed.
+      if (
+        size([
+          ...this.prefix,
+          ...replacement,
+          ...remaining.flatMap((value) => value.messages),
+        ]) <=
+        this.budget / 2
+      )
+        break;
+    }
+    if (removed.length && candidate) {
+      this.turns = remaining;
+      this.version = version;
+      this.checkpoints.set(version, candidate);
+      this.checkpointMessages = replacement;
       this.event({
         kind: "history",
         beforeBytes,
         afterBytes: size(this.messages()),
-        archivedTurns: archived.length,
+        archivedTurns: this.archive.size - this.turns.length,
         checkpoint: this.version,
       });
     }

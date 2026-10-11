@@ -282,6 +282,27 @@ export class BrowserContext {
       /* A fresh full snapshot restores current refs after any helper failure. */
     }
     // Propagate a failed refresh rather than returning potentially stale original refs.
-    return record(await this.fullSnapshot(), false, reason);
+    const fresh = await this.fullSnapshot();
+    // Preserve the action receipt, but remove its stale page and snapshot evidence.
+    const receipts = (
+      original.content as Array<{ type: "text"; text: string }>
+    ).flatMap((item) => {
+      const text = item.text
+        .replace(/### Snapshot\s*\n```ya?ml\n[\s\S]*?\n```/g, "")
+        .replace(/### Page\s*\n[\s\S]*?(?=\n### |$)/g, "")
+        .trim();
+      return text
+        ? [{ ...item, text: "### Original action receipt\n" + text }]
+        : [];
+    });
+    const result = {
+      ...original,
+      ...fresh,
+      content: [
+        ...(Array.isArray(fresh.content) ? fresh.content : []),
+        ...receipts,
+      ],
+    };
+    return record(result, false, reason);
   }
 }
