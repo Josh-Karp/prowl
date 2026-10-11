@@ -174,10 +174,19 @@ export class ConversationHistory {
         if (last && last[1] + 1 === id) last[1] = id;
         else ranges.push([id, id]);
       }
+      const archivedRequestedActionCounts: Record<string, number> = {};
+      for (const id of archived) {
+        for (const call of this.archive.get(id)?.[0]?.tool_calls ?? []) {
+          const name = call.function.name;
+          archivedRequestedActionCounts[name] =
+            (archivedRequestedActionCounts[name] ?? 0) + 1;
+        }
+      }
       candidate = {
         notice,
         checkpoint: version,
         archivedTurns: { count: archived.length, ranges },
+        archivedRequestedActionCounts,
         literalConfirmationEvidence: this.evidence,
         recentArchivedReceipts: removed.slice(-2).map((value) => ({
           turnId: value.id,

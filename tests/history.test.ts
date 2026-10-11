@@ -188,3 +188,19 @@ test("large archived arguments do not grow the checkpoint or prevent removing ot
     new RegExp("x".repeat(6000)),
   );
 });
+
+test("checkpoints count requested actions across repeated compactions without inferring success", () => {
+  const h = new ConversationHistory(prefix, 4000, 16384);
+  for (let id = 1; id <= 10; id++) {
+    h.appendTurn(turn(id, true));
+    const messages = h.prepare();
+    if (id < 3) continue;
+    const checkpoint = JSON.parse(messages[3].content);
+    assert.deepEqual(checkpoint.archivedRequestedActionCounts, {
+      browser_click: id - 2,
+      browser_snapshot: id - 2,
+    });
+    assert.equal(checkpoint.success, undefined);
+    assert.equal(checkpoint.completedSubmissions, undefined);
+  }
+});
