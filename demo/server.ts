@@ -37,6 +37,7 @@ async function startDemo() {
     try {
       logger.info("Customer registration demo: http://localhost:5173", {
         console: true,
+        persist: false,
       });
     } catch (error) {
       reportError(error);

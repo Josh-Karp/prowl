@@ -38,14 +38,16 @@ program
 program
   .command("run")
   .description("Fill and submit a form using the browser tools")
-  .option(
-    "--url <url>",
+  .argument(
+    "[url]",
     "Full form URL, including any query parameters",
     "http://localhost:5173",
   )
   .option("--runs <count>", "Number of varied submissions", "1")
   .option("--instructions <text>", "Additional form instructions")
-  .action((_options, command: Command) => runAction(command.optsWithGlobals()));
+  .action((url: string, _options, command: Command) =>
+    runAction({ ...command.optsWithGlobals(), url }),
+  );
 
 await program.parseAsync().catch((error) => {
   reportError(error);

@@ -142,7 +142,7 @@ test("packed CLI works without the checkout or development dependencies", async 
       );
       const result = run(
         executable,
-        ["run", "--max-iterations", "0"],
+        ["run", "https://example.com/form", "--max-iterations", "0"],
         workingDirectory,
       );
       assert.equal(result.status, 1);

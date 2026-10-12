@@ -10,6 +10,7 @@ interface LoggerOptions {
 interface LogOptions {
   data?: unknown;
   console?: boolean;
+  persist?: boolean;
 }
 type Level = "debug" | "info" | "warn" | "error";
 
@@ -82,30 +83,32 @@ export class Logger {
   }
 
   private write(level: Level, message: string, options: LogOptions = {}): void {
-    if (this.failure) throw this.failure;
-    const line = serialize({
-      timestamp: new Date().toISOString(),
-      level,
-      message,
-      data: options.data,
-    });
-    try {
-      mkdirSync(dirname(this.path), { recursive: true });
-      appendFileSync(this.path, line + "\n", {
-        encoding: "utf8",
-        flag: this.created ? "a" : "ax",
+    if (options.persist !== false) {
+      if (this.failure) throw this.failure;
+      const line = serialize({
+        timestamp: new Date().toISOString(),
+        level,
+        message,
+        data: options.data,
       });
-      this.created = true;
-    } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      this.failure = new LogWriteError(
-        `Unable to write log file ${this.path}: ${detail}`,
-        { cause },
-      );
-      process.stderr.write(
-        this.failure.message.replace(/[\r\n]+/g, " ") + "\n",
-      );
-      throw this.failure;
+      try {
+        mkdirSync(dirname(this.path), { recursive: true });
+        appendFileSync(this.path, line + "\n", {
+          encoding: "utf8",
+          flag: this.created ? "a" : "ax",
+        });
+        this.created = true;
+      } catch (cause) {
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        this.failure = new LogWriteError(
+          `Unable to write log file ${this.path}: ${detail}`,
+          { cause },
+        );
+        process.stderr.write(
+          this.failure.message.replace(/[\r\n]+/g, " ") + "\n",
+        );
+        throw this.failure;
+      }
     }
     if (this.verbose || options.console) {
       const detail =

@@ -97,6 +97,40 @@ test("quiet logging persists every level and only explicitly shows concise progr
   assert.doesNotMatch(output.stderr, /hidden-stack|Warning/);
 });
 
+test("console-only entries never create or append to a log file", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-console-only-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const output = capture(t);
+  const log = new Logger({ filePath: join(directory, "nested", "agent.log") });
+  log.info("Console only", { console: true, persist: false });
+  assert.equal(output.stdout, "[info] Console only\n");
+  assert.equal(existsSync(join(directory, "nested")), false);
+  log.info("Saved entry");
+  const contents = readFileSync(log.filePath, "utf8");
+  log.warn("Console warning", { console: true, persist: false });
+  assert.equal(output.stderr, "[warn] Console warning\n");
+  assert.equal(readFileSync(log.filePath, "utf8"), contents);
+});
+
+test("console-only logging works even after a file write failure", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-console-error-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const blocked = join(directory, "file");
+  writeFileSync(blocked, "not a directory");
+  const output = capture(t);
+  const log = new Logger({
+    filePath: join(blocked, "agent.log"),
+    verbose: true,
+  });
+  assert.throws(() => log.info("Cannot write"), /Unable to write log file/);
+  log.error("Console error", {
+    console: true,
+    persist: false,
+    data: { detail: "visible" },
+  });
+  assert.match(output.stderr, /\[error\] Console error\n.*visible/s);
+});
+
 test("each logger run gets a separate file and preserves previous logs", (t) => {
   const directory = mkdtempSync(join(tmpdir(), "prowl-verbose-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

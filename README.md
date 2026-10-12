@@ -47,7 +47,7 @@ npm uninstall --global prowl
 With your target application running:
 
 ```bash
-prowl run --url http://localhost:5173
+prowl run http://localhost:5173
 ```
 
 This URL is the bundled demo's root page; start the demo using the [development steps](#development). For another application, supply its full form URL. Quote URLs containing query parameters so your shell preserves them.
@@ -55,15 +55,15 @@ This URL is the bundled demo's root page; start the demo using the [development 
 To request multiple submissions or provide additional instructions:
 
 ```bash
-prowl run --url 'http://localhost:5173' \
+prowl run 'http://localhost:5173' \
   --runs 2 \
   --instructions 'Use varied synthetic data and choose Business for one customer' \
   --max-iterations 30
 ```
 
-| CLI flag                   | Environment fallback  | Default                                    |
+| CLI argument or flag       | Environment fallback  | Default                                    |
 | -------------------------- | --------------------- | ------------------------------------------ |
-| `--url <url>`              | —                     | `http://localhost:5173`                    |
+| `[url]`                    | —                     | `http://localhost:5173`                    |
 | `--runs <count>`           | —                     | 1 submission                               |
 | `--instructions <text>`    | —                     | No additional instructions                 |
 | `--model <name>`           | `OLLAMA_MODEL`        | `gemma4:12b`                               |
@@ -74,7 +74,7 @@ prowl run --url 'http://localhost:5173' \
 | `--history-bytes <bytes>`  | `PROWL_HISTORY_BYTES` | Twice `OLLAMA_NUM_CTX`                     |
 | `--verbose`                | —                     | Off                                        |
 
-`--url`, `--runs`, and `--instructions` belong to `run`. The other options apply to the whole program and can also be supplied after `run`. Use `prowl --help` for global options and `prowl run --help` for the form options. URLs must use HTTP or HTTPS; runs and maximum iterations must be positive safe integers.
+`[url]` is the first argument to `run`; `--runs` and `--instructions` are its options. The other options apply to the whole program and can also be supplied after `run`. Use `prowl --help` for global options and `prowl run --help` for the form options. URLs must use HTTP or HTTPS; runs and maximum iterations must be positive safe integers.
 
 Two additional environment settings control model requests:
 
@@ -96,7 +96,7 @@ Older complete conversation turns are archived and replaced with deterministic c
 The model can call `prowl_full_snapshot` for a fresh complete page or `prowl_browser_history` for archived evidence. Historical refs are marked stale. For troubleshooting, preserve the original behavior with:
 
 ```bash
-prowl run --url 'http://localhost:5173' --context-mode full
+prowl run 'http://localhost:5173' --context-mode full
 ```
 
 ## Results and logs
@@ -136,7 +136,7 @@ pnpm demo
 Leave the demo running, then use a second terminal in the repository:
 
 ```bash
-pnpm prowl run --url http://localhost:5173
+pnpm prowl run http://localhost:5173
 # Or run the development entry point with the same defaults:
 pnpm dev
 ```
@@ -155,7 +155,7 @@ pnpm format                # Format supported project files
 pnpm build                 # Recreate dist from src; exclude demo and tests
 pnpm test:context          # Opt-in native-form integration with real Playwright MCP
 pnpm test:package          # Pack and test an isolated installation
-pnpm clean                 # Delete logs/ and .playwright-mcp, retaining dist/tarballs
+pnpm clean                 # Delete logs/, .playwright-mcp, and dist; retain tarballs
 ```
 
 `pnpm test` needs no live Ollama, browser, or target application. Before handing off code changes, run type checking, tests, lint, and the formatting check. Also run `pnpm test:package` for changes affecting runtime dependencies, packaging, executable entry points, or installed file paths. Repository conventions are in the root `AGENTS.md`, which is available in the checkout.
@@ -165,7 +165,10 @@ Application code uses `src/logger.ts`; `{ console: true }` makes useful progress
 ```ts
 logger.info("Waiting for model...", { console: true });
 logger.debug("Model response", { data: response });
+logger.info("Demo ready", { console: true, persist: false });
 ```
+
+`persist` defaults to `true`; `{ console: true, persist: false }` prints to the console without writing that entry to a log file. The demo startup message uses this option, so starting the demo alone does not create a log file.
 
 ## Packaging
 
@@ -182,7 +185,7 @@ prowl --help
 
 `pnpm test:package` installs an archive into a temporary npm prefix and runs the installed executable outside the checkout without development dependencies. It checks package contents, stale build removal, help, validation, working-directory configuration and logs, and the version sent during MCP initialization. It leaves the machine's global installation alone and does not require a live Ollama or Playwright service. Dependency installation requires registry access or a populated npm cache.
 
-The package test does not verify a live browser task. For that check, start Ollama and the demo, then run the installed command from outside the checkout with a suitable `--model` and `--url http://localhost:5173`.
+The package test does not verify a live browser task. For that check, start Ollama and the demo, then run the installed command from outside the checkout with a suitable `--model` and the form URL: `prowl run http://localhost:5173 --model <name>`.
 
 ## Troubleshooting
 
