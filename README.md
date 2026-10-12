@@ -127,7 +127,7 @@ pnpm lint:fix              # Apply ESLint fixes
 pnpm format                # Format supported project files
 pnpm build                 # Recreate dist from src; exclude demo and tests
 pnpm test:package          # Pack and test an isolated installation
-pnpm clean                 # Delete logs/ and .playwright-mcp, retaining dist/tarballs
+pnpm clean                 # Delete logs/, .playwright-mcp, and dist; retain tarballs
 ```
 
 `pnpm test` needs no live Ollama, browser, or target application. Before handing off code changes, run type checking, tests, lint, and the formatting check. Also run `pnpm test:package` for changes affecting runtime dependencies, packaging, executable entry points, or installed file paths. Repository conventions are in the root `AGENTS.md`, which is available in the checkout.
@@ -137,7 +137,10 @@ Application code uses `src/logger.ts`; `{ console: true }` makes useful progress
 ```ts
 logger.info("Waiting for model...", { console: true });
 logger.debug("Model response", { data: response });
+logger.info("Demo ready", { console: true, persist: false });
 ```
+
+`persist` defaults to `true`; `{ console: true, persist: false }` prints to the console without writing that entry to a log file. The demo startup message uses this option, so starting the demo alone does not create a log file.
 
 ## Packaging
 
