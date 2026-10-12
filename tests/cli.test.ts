@@ -41,13 +41,27 @@ function singleLog(basePath: string) {
   return paths[0];
 }
 
+test("run validates the positional form URL", (t) => {
+  const filePath = join(temporaryDirectory(t), "url.log");
+  const result = run("src/cli.ts", ["run", "file:///tmp/form.html"], filePath);
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr, "[error] Form URL must use HTTP or HTTPS.\n");
+});
+
 test("CLI logs a failure once, quietly, with CLI path overriding LOG_FILE", (t) => {
   const directory = temporaryDirectory(t);
   const filePath = join(directory, "cli.log");
   const environmentPath = join(directory, "env.log");
   const result = run(
     "src/cli.ts",
-    ["run", "--max-iterations", "0", "--log-file", filePath],
+    [
+      "run",
+      "https://example.com/form?mode=test",
+      "--max-iterations",
+      "0",
+      "--log-file",
+      filePath,
+    ],
     environmentPath,
   );
   assert.equal(result.status, 1, result.stderr);
