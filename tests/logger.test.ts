@@ -1,15 +1,50 @@
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { Logger, configureLogger, logger, reportError } from "../src/logger.js";
+import { ContextArtifacts } from "../src/agent/artifacts.js";
+
+test("each run keeps its log, history and snapshots together in one folder", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-run-folder-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const paths: string[] = [];
+  for (const value of ["first", "second"]) {
+    const log = new Logger({ filePath: join(directory, "custom.log") });
+    const runDirectory = dirname(log.filePath);
+    assert.equal(dirname(runDirectory), directory);
+    assert.match(basename(runDirectory), /^custom-\d{4}-\d{2}-\d{2}T/);
+    assert.equal(basename(log.filePath), "custom.log");
+    assert.equal(existsSync(runDirectory), false);
+    log.info(value);
+    const artifacts = new ContextArtifacts(log.filePath);
+    artifacts.history({ value });
+    artifacts.snapshot({ value });
+    assert.deepEqual(readdirSync(runDirectory).sort(), [
+      "custom.log",
+      "history.jsonl",
+      "snapshot-0001.json",
+    ]);
+    assert.equal(
+      JSON.parse(readFileSync(join(runDirectory, "history.jsonl"), "utf8"))
+        .value,
+      value,
+    );
+    paths.push(log.filePath);
+  }
+  assert.notEqual(dirname(paths[0]), dirname(paths[1]));
+  assert.match(readFileSync(paths[0], "utf8"), /first/);
+  assert.doesNotMatch(readFileSync(paths[0], "utf8"), /second/);
+});
 
 function capture(t: TestContext) {
   let stdout = "",
@@ -76,7 +111,8 @@ test("each logger run gets a separate file and preserves previous logs", (t) => 
   assert.match(output.stdout, /Response.*detailed-value/s);
   assert.match(output.stderr, /Slow.*50/s);
   assert.notEqual(earlier.filePath, log.filePath);
-  assert.match(log.filePath, /agent-\d{4}-\d{2}-\d{2}T.*\.log$/);
+  assert.match(dirname(log.filePath), /agent-\d{4}-\d{2}-\d{2}T/);
+  assert.equal(basename(log.filePath), "agent.log");
   assert.equal(readFileSync(filePath, "utf8"), "Legacy log\n");
   assert.equal(
     readFileSync(earlier.filePath, "utf8").trim().split("\n").length,
@@ -151,6 +187,7 @@ test("an existing generated filename is never overwritten or appended to", (t) =
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   capture(t);
   const log = new Logger({ filePath: join(directory, "agent.log") });
+  mkdirSync(dirname(log.filePath), { recursive: true });
   writeFileSync(log.filePath, "Existing run\n");
   assert.throws(() => log.info("New run"), /Unable to write log file/);
   assert.equal(readFileSync(log.filePath, "utf8"), "Existing run\n");

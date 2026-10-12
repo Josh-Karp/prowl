@@ -153,9 +153,15 @@ test("packed CLI works without the checkout or development dependencies", async 
       );
       const logs = readdirSync(join(workingDirectory, "logs"));
       assert.equal(logs.length, 1);
-      assert.match(logs[0], /^local-.*\.log$/);
+      assert.match(logs[0], /^local-\d{4}-\d{2}-\d{2}T/);
+      assert.deepEqual(readdirSync(join(workingDirectory, "logs", logs[0])), [
+        "local.log",
+      ]);
       const record = JSON.parse(
-        readFileSync(join(workingDirectory, "logs", logs[0]), "utf8"),
+        readFileSync(
+          join(workingDirectory, "logs", logs[0], "local.log"),
+          "utf8",
+        ),
       );
       assert.equal(record.level, "error");
       assert.match(record.data.stack, /maxIterations/);

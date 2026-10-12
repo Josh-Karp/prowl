@@ -1,12 +1,12 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-/** Owns only the directory associated with this invocation's unique log path. */
+import { dirname, join } from "node:path";
+/** Stores context artifacts beside the log in this invocation's unique directory. */
 export class ContextArtifacts {
   readonly directory: string;
   private sequence = 0;
   private historyCreated = false;
   constructor(logPath: string) {
-    this.directory = logPath + ".artifacts";
+    this.directory = dirname(logPath);
   }
   snapshot(value: unknown): void {
     mkdirSync(this.directory, { recursive: true });

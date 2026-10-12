@@ -60,7 +60,8 @@ export class Logger {
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     this.path = join(
       dir,
-      `${name}-${timestamp}-${randomUUID()}${ext || ".log"}`,
+      `${name}-${timestamp}-${randomUUID()}`,
+      `${name}${ext || ".log"}`,
     );
     this.verbose = options.verbose ?? false;
     this.created = false;

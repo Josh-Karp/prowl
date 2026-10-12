@@ -241,7 +241,7 @@ test("automatic mode routes local tools, strips completed thinking and archives 
   );
   assert.match(readFileSync(path, "utf8"), /context-config/);
   assert.match(
-    readFileSync(path + ".artifacts/history.jsonl", "utf8"),
+    readFileSync(join(path, "..", "history.jsonl"), "utf8"),
     /DEMO-Exact-321/,
   );
 });
@@ -322,7 +322,7 @@ test("long automatic conversations compact and retrieve exact archived confirmat
   const logs = readFileSync(path, "utf8");
   assert.match(logs, /"kind":"history"/);
   assert.match(
-    readFileSync(path + ".artifacts/history.jsonl", "utf8"),
+    readFileSync(join(path, "..", "history.jsonl"), "utf8"),
     /browser details/,
   );
 });

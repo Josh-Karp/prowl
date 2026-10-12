@@ -105,13 +105,22 @@ Normal console output shows the log path, connection and iteration progress, too
 
 The process exits with code 0 when the model finishes without further tool calls, and code 1 for validation errors, uncaught runtime errors, or an exhausted iteration budget. A model can finish by reporting a blocker, so exit code 0 is not an assertion that the form passed. Read the final report and visible confirmation details to interpret the outcome. Tool-reported errors are returned to the model so it can choose its next action.
 
-Each invocation creates a separate JSON-lines log containing model responses, tool arguments and results, timings, and error details. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID, producing `logs/prowl-<timestamp>-<id>.log`. Multiple requested submissions share that invocation's file, and previous logs are retained. Files are created only when the first entry is written.
+Each invocation creates a separate folder containing its JSON-lines log and context artifacts. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID to the folder name, producing `logs/prowl-<timestamp>-<id>/prowl.log`. The log contains model responses, tool arguments and results, timings, and error details. Multiple requested submissions share that invocation's folder, and previous runs are retained. The folder and log are created only when the first entry is written.
 
-Automatic runs save snapshot JSON and original conversation turns in `<unique-log-path>.artifacts/`, beside the invocation's log. These files contain browser/task data; add `*.artifacts/` to your project's ignore rules if logs are outside an already ignored directory. `history.jsonl` preserves original tool receipts and thinking; numbered snapshot files preserve unreduced observations collected by the context adapter. Full mode retains raw results in the log.
+Automatic runs save `history.jsonl` and numbered snapshot JSON files directly beside the log in the same run folder:
+
+```text
+logs/prowl-<timestamp>-<id>/
+  prowl.log
+  history.jsonl
+  snapshot-0001.json
+```
+
+These files contain browser/task data; ignore the entire log directory in your project. `history.jsonl` preserves original tool receipts and thinking; numbered snapshot files preserve unreduced observations collected by the context adapter. Full mode retains raw results in the log and does not create context artifacts. Existing logs and `.artifacts/` folders from previous versions are left in place.
 
 Structured `Context event` log records (schema version 1) include effective configuration, reduction/fallback decisions, history compactions, budget exceptions, and inference request sizes. Ollama token counts, cached counts and duration fields are recorded when supplied; durations use the provider's nanoseconds. Missing provider metrics are omitted.
 
-Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` changes the base name to `./custom-<timestamp>-<id>.log`; `LOG_FILE` supplies the base filename when the flag is absent. This checkout ignores `logs/` and `*.log`. When using the installed CLI in another project, add the desired log paths to that project's `.gitignore`.
+Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` produces `./custom-<timestamp>-<id>/custom.log`, with automatic context artifacts in that same folder; `LOG_FILE` supplies the base filename when the flag is absent. This checkout ignores `logs/`, timestamped run folders, and `*.log`. When using the installed CLI in another project, add the desired log directory to that project's `.gitignore`.
 
 ## Development
 
