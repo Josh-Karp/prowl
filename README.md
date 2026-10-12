@@ -16,12 +16,12 @@ Installed users do not need pnpm, TypeScript, or tsx. Contributors also need pnp
 Prowl is distributed as a local package tarball. Build one using the [packaging steps](#packaging), or install a supplied tarball:
 
 ```bash
-npm install --global /path/to/prowl-0.1.0.tgz
+npm install --global /path/to/prowl-0.1.1.tgz
 prowl --help
 prowl run --help
 ```
 
-The filename follows the version in `package.json`; `prowl-0.1.0.tgz` is the current example. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
+The filename follows the version in `package.json`; `prowl-0.1.1.tgz` is the current example. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
 
 Run Prowl from your project directory. It loads `.env` from that directory, not from the installed package. For example:
 
@@ -93,6 +93,8 @@ The process exits with code 0 when the model finishes without further tool calls
 
 Each invocation creates a separate JSON-lines log containing model responses, tool arguments and results, timings, and error details. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID, producing `logs/prowl-<timestamp>-<id>.log`. Multiple requested submissions share that invocation's file, and previous logs are retained. Files are created only when the first entry is written.
 
+Each successfully parsed Ollama chat response also adds an `Ollama completion metadata` debug entry, including responses with empty content or no tool calls. It records the returned `model`, `created_at`, `done`, and `done_reason`; prompt, cached prompt, and generated token counts (`prompt_eval_count`, `prompt_eval_cached_count`, `eval_count`); and server durations (`total_duration`, `load_duration`, `prompt_eval_duration`, `eval_duration`) in **nanoseconds**. Fields unavailable on the server are omitted; responses without metadata produce an empty data object. These server timings are separate from the existing client request timings in milliseconds. Normal console progress stays concise; `--verbose` also displays the metadata. A server completion reason describes the model response ending, not whether all requested form submissions succeeded. See the [Ollama chat API reference](https://docs.ollama.com/api/chat).
+
 Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` changes the base name to `./custom-<timestamp>-<id>.log`; `LOG_FILE` supplies the base filename when the flag is absent. This checkout ignores `logs/` and `*.log`. When using the installed CLI in another project, add the desired log paths to that project's `.gitignore`.
 
 ## Development
@@ -148,8 +150,8 @@ After installing the development dependencies:
 
 ```bash
 npm pack --dry-run         # Inspect the package contents; lifecycle scripts may rebuild dist
-npm pack                   # Creates prowl-0.1.0.tgz
-npm install --global ./prowl-0.1.0.tgz
+npm pack                   # Creates prowl-0.1.1.tgz
+npm install --global ./prowl-0.1.1.tgz
 prowl --help
 ```
 
