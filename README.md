@@ -93,13 +93,13 @@ The process exits with code 0 when the model returns a nonblank final response w
 
 If a model response contains neither tool calls nor a nonblank answer, Prowl asks the model to continue or report a blocker. Thinking alone does not count as an answer. Prowl allows two recovery attempts per consecutive sequence of empty responses; tool calls reset the counter. Recovery requests count toward `--max-iterations`, retain the conversation and browser session, and do not replay earlier tool calls. A third consecutive empty response fails explicitly. If the iteration budget runs out first, Prowl reports the iteration-limit error instead.
 
-Each invocation creates a separate JSON-lines log containing model responses, tool arguments and results, timings, and error details. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID, producing `logs/prowl-<timestamp>-<id>.log`. Multiple requested submissions share that invocation's file, and previous logs are retained. Files are created only when the first entry is written.
+Each invocation creates a separate folder for its JSON-lines log. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID to the folder name, producing `logs/prowl-<timestamp>-<id>/prowl.log`. The log contains model responses, tool arguments and results, timings, and error details. Multiple requested submissions share that invocation's folder, and previous runs are retained. The folder and log are created only when the first entry is written.
 
 Each successfully parsed Ollama chat response also adds an `Ollama completion metadata` debug entry, including responses with empty content or no tool calls. It records the returned `model`, `created_at`, `done`, and `done_reason`; prompt, cached prompt, and generated token counts (`prompt_eval_count`, `prompt_eval_cached_count`, `eval_count`); and server durations (`total_duration`, `load_duration`, `prompt_eval_duration`, `eval_duration`) in **nanoseconds**. Fields unavailable on the server are omitted; responses without metadata produce an empty data object. These server timings are separate from the existing client request timings in milliseconds. Normal console progress stays concise; `--verbose` also displays the metadata. A server completion reason describes the model response ending, not whether all requested form submissions succeeded. See the [Ollama chat API reference](https://docs.ollama.com/api/chat).
 
 Each successfully parsed response also adds a `Context event` debug entry with `schemaVersion: 1` and `kind: "inference"`. It records the effective context window (`numCtx`) and UTF-8 serialized byte sizes for messages (`messagesBytes`), tool definitions (`toolsBytes`), and the complete request body (`requestBytes`). When tools are omitted, `toolsBytes` measures an empty list. Available provider token counts and duration fields are included only when they are finite, nonnegative numbers; missing or invalid metrics are omitted and durations remain in nanoseconds. Byte sizes describe request data, not an exact token count. These metrics are separate from the assistant message and are also exposed through an optional callback in the model adapter.
 
-Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` changes the base name to `./custom-<timestamp>-<id>.log`; `LOG_FILE` supplies the base filename when the flag is absent. This checkout ignores `logs/` and `*.log`. When using the installed CLI in another project, add the desired log paths to that project's `.gitignore`.
+Paths are relative to your working directory unless absolute. The logger creates the directory automatically. `--log-file ./custom.log` produces `./custom-<timestamp>-<id>/custom.log`; `LOG_FILE` supplies the base filename when the flag is absent. A base filename without an extension uses `.log`. This checkout ignores `logs/`, timestamped run folders, `*.log`, and legacy `*.artifacts/` folders. When using the installed CLI in another project, add the desired log directory to that project's `.gitignore`. Existing logs and artifact folders are retained.
 
 ## Development
 
@@ -147,6 +147,8 @@ logger.info("Demo ready", { console: true, persist: false });
 ```
 
 `persist` defaults to `true`; `{ console: true, persist: false }` prints to the console without writing that entry to a log file. The demo startup message uses this option, so starting the demo alone does not create a log file.
+
+The context artifact writer in `src/agent/artifacts.ts` stores `history.jsonl` and numbered snapshot JSON files beside an invocation’s log. It creates files lazily, appends subsequent history entries, and refuses to overwrite existing history or snapshots. The agent loop does not yet invoke this writer; a CLI run currently creates only its log file.
 
 ## Packaging
 

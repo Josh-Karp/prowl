@@ -29,10 +29,8 @@ function run(entry: string, args: string[], logFile: string) {
 function logs(basePath: string) {
   const { name, ext } = parse(basePath);
   return readdirSync(dirname(basePath))
-    .filter(
-      (file) => file.startsWith(`${name}-`) && file.endsWith(ext || ".log"),
-    )
-    .map((file) => join(dirname(basePath), file));
+    .filter((file) => file.startsWith(`${name}-`))
+    .map((file) => join(dirname(basePath), file, name + (ext || ".log")));
 }
 
 function singleLog(basePath: string) {
@@ -146,7 +144,13 @@ test("gitignore covers default and custom logs", (t) => {
   assert.equal(init.status, 0, init.stderr);
   const result = spawnSync(
     "git",
-    ["check-ignore", "logs/prowl.log", "nested/custom.log", "src/logger.ts"],
+    [
+      "check-ignore",
+      "logs/prowl.log",
+      "nested/custom.log",
+      "nested/custom-2026-10-12T08-00-00-000Z-example/history.jsonl",
+      "src/logger.ts",
+    ],
     {
       cwd: directory,
       encoding: "utf8",
@@ -156,5 +160,6 @@ test("gitignore covers default and custom logs", (t) => {
   assert.deepEqual(result.stdout.trim().split("\n"), [
     "logs/prowl.log",
     "nested/custom.log",
+    "nested/custom-2026-10-12T08-00-00-000Z-example/history.jsonl",
   ]);
 });

@@ -24,7 +24,7 @@ program
   .option("--verbose", "Print detailed logs to the console")
   .option(
     "--log-file <path>",
-    "Log base filename; a unique run suffix is added (defaults to LOG_FILE or logs/prowl.log)",
+    "Log base filename; each run uses a unique folder (defaults to LOG_FILE or logs/prowl.log)",
   );
 
 program
