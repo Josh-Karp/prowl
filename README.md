@@ -89,7 +89,9 @@ All requested submissions share one agent conversation and one iteration budget.
 
 Normal console output shows the log path, connection and iteration progress, tool names, the final model report, and concise failures. `--verbose` also prints detailed model and tool data. Help does not create a log file.
 
-The process exits with code 0 when the model finishes without further tool calls, and code 1 for validation errors, uncaught runtime errors, or an exhausted iteration budget. A model can finish by reporting a blocker, so exit code 0 is not an assertion that the form passed. Read the final report and visible confirmation details to interpret the outcome. Tool-reported errors are returned to the model so it can choose its next action.
+The process exits with code 0 when the model returns a nonblank final response without further tool calls, and code 1 for validation errors, uncaught runtime errors, an exhausted iteration budget, or repeated empty model responses. A model can finish by reporting a blocker, so exit code 0 is not an assertion that the form passed. Read the final report and visible confirmation details to interpret the outcome. Tool-reported errors are returned to the model so it can choose its next action.
+
+If a model response contains neither tool calls nor a nonblank answer, Prowl asks the model to continue or report a blocker. Thinking alone does not count as an answer. Prowl allows two recovery attempts per consecutive sequence of empty responses; tool calls reset the counter. Recovery requests count toward `--max-iterations`, retain the conversation and browser session, and do not replay earlier tool calls. A third consecutive empty response fails explicitly. If the iteration budget runs out first, Prowl reports the iteration-limit error instead.
 
 Each invocation creates a separate JSON-lines log containing model responses, tool arguments and results, timings, and error details. `logs/prowl.log` is the default base filename; the logger adds a UTC timestamp and unique ID, producing `logs/prowl-<timestamp>-<id>.log`. Multiple requested submissions share that invocation's file, and previous logs are retained. Files are created only when the first entry is written.
 
@@ -163,15 +165,16 @@ The package test does not verify a live browser task. For that check, start Olla
 
 ## Troubleshooting
 
-| Symptom                                         | Check                                                                                                                                                          |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `prowl` is not found                            | Confirm installation succeeded and your npm global executable directory is on `PATH`; on Windows, npm creates a command shim in the global prefix.             |
-| Ollama request or connection fails              | Check that Ollama is running, the base URL is reachable, and the configured model tag exists and supports tools. Detailed HTTP response errors are in the log. |
-| Playwright does not connect or launch a browser | Check that `npx` is available, package downloads can finish, and the required browser is installed. Consult the Playwright MCP documentation linked above.     |
-| `Agent exceeded maximum iterations.`            | Review the log for repeated or blocked actions; refine `--instructions` or increase `--max-iterations` for a task that needs more steps.                       |
-| Model request times out                         | Check Ollama's responsiveness and resources, then adjust `OLLAMA_TIMEOUT_MS` in milliseconds if needed.                                                        |
-| `Unable to write log file`                      | Use a writable directory with `--log-file`; confirm the parent path is a directory rather than a file.                                                         |
-| Demo startup fails                              | Check whether port 5173 is already in use and inspect the reported error.                                                                                      |
+| Symptom                                                                          | Check                                                                                                                                                                             |
+| -------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `prowl` is not found                                                             | Confirm installation succeeded and your npm global executable directory is on `PATH`; on Windows, npm creates a command shim in the global prefix.                                |
+| Ollama request or connection fails                                               | Check that Ollama is running, the base URL is reachable, and the configured model tag exists and supports tools. Detailed HTTP response errors are in the log.                    |
+| Playwright does not connect or launch a browser                                  | Check that `npx` is available, package downloads can finish, and the required browser is installed. Consult the Playwright MCP documentation linked above.                        |
+| `Agent exceeded maximum iterations.`                                             | Review the log for repeated or blocked actions; refine `--instructions` or increase `--max-iterations` for a task that needs more steps.                                          |
+| `Model returned an empty response without tool calls after 2 recovery attempts.` | Review the logged model responses and recovery warnings. The model returned no action or final report after both follow-ups; check that the configured model supports tool calls. |
+| Model request times out                                                          | Check Ollama's responsiveness and resources, then adjust `OLLAMA_TIMEOUT_MS` in milliseconds if needed.                                                                           |
+| `Unable to write log file`                                                       | Use a writable directory with `--log-file`; confirm the parent path is a directory rather than a file.                                                                            |
+| Demo startup fails                                                               | Check whether port 5173 is already in use and inspect the reported error.                                                                                                         |
 
 ## Git hooks and dependency updates
 

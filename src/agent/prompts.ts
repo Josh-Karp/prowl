@@ -14,6 +14,9 @@ For unfamiliar forms:
 - Opening the browser is only the first step. Continue calling tools until input, submission and verification are complete, or a blocker is observed.
 - Give a final report of entered fields, each submission result, visible confirmation/error text and any observed reference/ID.`;
 
+export const emptyResponseRecovery =
+  "Your response contained no tool calls or final report. Continue the task using the available tools, or provide a final report describing the observed outcome or blocker. Do not repeat a submission whose outcome is uncertain.";
+
 export function formTask(url: string, runs: number, instructions = "") {
   return `Fill and submit the form at ${url} ${runs} time(s).
 Generate plausible, varied data for each run and discover the fields and steps from the browser.

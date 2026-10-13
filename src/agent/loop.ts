@@ -3,8 +3,10 @@ import type { OllamaMessage } from "../models/ollama.js";
 
 import { chat } from "../models/ollama.js";
 import { mcpToolsToOllamaTools } from "./tools.js";
-import { system } from "./prompts.js";
+import { emptyResponseRecovery, system } from "./prompts.js";
 import { logger } from "../logger.js";
+
+const MAX_EMPTY_RESPONSE_RETRIES = 2;
 
 export async function runAgent(
   client: Client,
@@ -46,6 +48,7 @@ export async function runAgent(
       content: task,
     },
   ];
+  let consecutiveEmptyResponses = 0;
 
   for (let iteration = 0; iteration < maxIterations; iteration++) {
     logger.info(
@@ -77,14 +80,38 @@ export async function runAgent(
     });
 
     if (!response.tool_calls?.length) {
+      // Empty or thinking-only responses do not indicate completion; ask the model to continue.
+      if (!(response.content ?? "").trim()) {
+        consecutiveEmptyResponses++;
+        if (consecutiveEmptyResponses > MAX_EMPTY_RESPONSE_RETRIES) {
+          logger.debug("Stopping: empty-response recovery exhausted");
+          throw new Error(
+            `Model returned an empty response without tool calls after ${MAX_EMPTY_RESPONSE_RETRIES} recovery attempts.`,
+          );
+        }
+        if (iteration + 1 >= maxIterations) break;
+
+        logger.warn(
+          `Model returned no tool calls or final report; recovery attempt ${consecutiveEmptyResponses}/${MAX_EMPTY_RESPONSE_RETRIES}.`,
+          { console: true },
+        );
+        messages.push({
+          role: "user",
+          content: emptyResponseRecovery,
+        });
+        continue;
+      }
+
       logger.debug("Stopping: the model returned no tool calls");
       logger.info(
-        `Final response:\n${response.content || "(empty)"}\nAgent finished after ${iteration + 1} iterations in ${(performance.now() - startedAt).toFixed(0)} ms.`,
+        `Final response:\n${response.content}\nAgent finished after ${iteration + 1} iterations in ${(performance.now() - startedAt).toFixed(0)} ms.`,
         { console: true },
       );
+
       return;
     }
 
+    consecutiveEmptyResponses = 0;
     for (const [toolIndex, toolCall] of response.tool_calls.entries()) {
       logger.info(
         `Executing tool ${toolIndex + 1}/${response.tool_calls.length}: ${toolCall.function.name}`,
