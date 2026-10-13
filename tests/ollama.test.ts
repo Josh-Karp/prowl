@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { chat } from "../src/models/ollama.js";
+import {
+  chat,
+  type OllamaMetrics,
+  type OllamaMessage,
+  type OllamaTool,
+} from "../src/models/ollama.js";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -188,9 +193,145 @@ for (const { name, message, metadata } of metadataCases) {
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.equal(records.length, 1);
-    assert.equal(records[0].level, "debug");
-    assert.equal(records[0].message, "Ollama completion metadata");
-    assert.deepEqual(records[0].data, metadata);
+    const completionRecords = records.filter(
+      (record) => record.message === "Ollama completion metadata",
+    );
+    assert.equal(completionRecords.length, 1);
+    assert.equal(completionRecords[0].level, "debug");
+    assert.deepEqual(completionRecords[0].data, metadata);
   });
 }
+
+test("reports provider usage and UTF-8 request sizes without changing the assistant message", async (t) => {
+  const path = isolatedLog(t);
+  const originalContext = process.env.OLLAMA_NUM_CTX;
+  process.env.OLLAMA_NUM_CTX = "4096";
+  t.after(() => {
+    if (originalContext === undefined) delete process.env.OLLAMA_NUM_CTX;
+    else process.env.OLLAMA_NUM_CTX = originalContext;
+  });
+  const messages: OllamaMessage[] = [
+    { role: "user", content: "Visit café 🐈" },
+  ];
+  const tools: OllamaTool[] = [
+    {
+      type: "function",
+      function: {
+        name: "browser_snapshot",
+        description: "Inspect café",
+        parameters: { type: "object" },
+      },
+    },
+  ];
+  const message = {
+    role: "assistant",
+    content: "Done",
+    thinking: "Original reasoning",
+  };
+  const usage = {
+    prompt_eval_count: 200,
+    prompt_eval_cached_count: 50,
+    prompt_eval_duration: 900000,
+    eval_count: 10,
+    eval_duration: 200000,
+    total_duration: 1200000,
+    load_duration: 0,
+  };
+  let requestBody = "";
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (_url: unknown, options: RequestInit) => {
+      requestBody = options.body as string;
+      return new Response(JSON.stringify({ message, ...usage }));
+    },
+  );
+  const metrics: OllamaMetrics[] = [];
+  assert.deepEqual(
+    await chat(messages, tools, "model", "http://localhost:11434", (value) =>
+      metrics.push(value),
+    ),
+    message,
+  );
+  assert.equal(metrics.length, 1);
+  assert.deepEqual(metrics[0], {
+    kind: "inference",
+    numCtx: 4096,
+    messagesBytes: Buffer.byteLength(JSON.stringify(messages)),
+    toolsBytes: Buffer.byteLength(JSON.stringify(tools)),
+    requestBytes: Buffer.byteLength(requestBody),
+    ...usage,
+  });
+  assert.ok(metrics[0].messagesBytes > JSON.stringify(messages).length);
+  const records = readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    records.find((record) => record.message === "Context event")?.data,
+    { schemaVersion: 1, ...metrics[0] },
+  );
+  assert.deepEqual(
+    records.find((record) => record.message === "Ollama completion metadata")
+      ?.data,
+    usage,
+  );
+});
+
+test("omits absent usage fields and sizes absent tools as an empty list", async (t) => {
+  isolatedLog(t);
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify({ message: { role: "assistant", content: "Done" } }),
+      ),
+  );
+  const metrics: OllamaMetrics[] = [];
+  await chat([], undefined, "model", "http://localhost:11434", (value) =>
+    metrics.push(value),
+  );
+  assert.equal(metrics.length, 1);
+  assert.equal(metrics[0].toolsBytes, 2);
+  assert.equal(metrics[0].messagesBytes, 2);
+  for (const field of [
+    "prompt_eval_count",
+    "prompt_eval_cached_count",
+    "prompt_eval_duration",
+    "eval_count",
+    "eval_duration",
+    "total_duration",
+    "load_duration",
+  ]) {
+    assert.equal(Object.hasOwn(metrics[0], field), false, field);
+  }
+});
+
+test("excludes negative nonfinite and nonnumeric provider usage while retaining zero", async (t) => {
+  isolatedLog(t);
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        '{"message":{"role":"assistant","content":"Done"},"prompt_eval_count":-1,"prompt_eval_cached_count":"50","prompt_eval_duration":null,"eval_count":1e400,"eval_duration":-1e400,"total_duration":true,"load_duration":0}',
+      ),
+  );
+  const metrics: OllamaMetrics[] = [];
+  await chat([], [], "model", "http://localhost:11434", (value) =>
+    metrics.push(value),
+  );
+  assert.equal(metrics.length, 1);
+  assert.equal(metrics[0].load_duration, 0);
+  for (const field of [
+    "prompt_eval_count",
+    "prompt_eval_cached_count",
+    "prompt_eval_duration",
+    "eval_count",
+    "eval_duration",
+    "total_duration",
+  ]) {
+    assert.equal(Object.hasOwn(metrics[0], field), false, field);
+  }
+});
