@@ -1,6 +1,6 @@
 import type { ContextOptions } from "#agent/context/options.js";
 
-export interface RunActionOptions extends ContextOptions {
+export interface RunOptions extends ContextOptions {
   url?: string;
   runs?: string | number;
   model?: string;
@@ -11,16 +11,16 @@ export interface RunActionOptions extends ContextOptions {
   logFile?: string;
 }
 
-export interface ResolvedRunActionOptions {
+export interface ResolvedRunOptions {
   url: string;
   runs: number;
   maxIterations: number;
 }
 
-export function resolveRunActionOptions(
-  options: RunActionOptions = {},
+export function resolveRunOptions(
+  options: RunOptions = {},
   env: NodeJS.ProcessEnv = process.env,
-): ResolvedRunActionOptions {
+): ResolvedRunOptions {
   const url = options.url ?? "http://localhost:5173";
   if (!["http:", "https:"].includes(new URL(url).protocol)) {
     throw new Error("Form URL must use HTTP or HTTPS.");

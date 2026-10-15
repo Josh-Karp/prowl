@@ -52,7 +52,7 @@ test(
       arguments: { url: `http://127.0.0.1:${address.port}/` },
     });
     const { tools } = await client.listTools();
-    const context = new BrowserContext(client, tools);
+    const context = new BrowserContext(client, { capabilities: tools });
     const observe = async () => {
       const full = await client.callTool({
         name: "browser_snapshot",

@@ -11,8 +11,8 @@ export interface HistoryEvent {
 interface HistoryOptions {
   budget: number;
   numCtx: number;
-  event?: (value: HistoryEvent) => void;
-  archive?: (value: { id: number; messages: OllamaMessage[] }) => void;
+  onEvent?: (value: HistoryEvent) => void;
+  onArchive?: (value: { id: number; messages: OllamaMessage[] }) => void;
 }
 
 interface Turn {
@@ -151,7 +151,7 @@ export class ConversationHistory {
       );
     const id = this.nextId;
     const raw = structuredClone(original);
-    this.options.archive?.({ id, messages: structuredClone(raw) });
+    this.options.onArchive?.({ id, messages: structuredClone(raw) });
     this.archive.set(id, raw);
     this.nextId++;
     const messages = structuredClone(displayed).map((message) => {
@@ -287,7 +287,7 @@ export class ConversationHistory {
   }
 
   private emit(kind: HistoryEvent["kind"], beforeBytes: number): void {
-    this.options.event?.({
+    this.options.onEvent?.({
       kind,
       beforeBytes,
       afterBytes: size(this.messages()),

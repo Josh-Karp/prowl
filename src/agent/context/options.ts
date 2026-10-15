@@ -1,3 +1,5 @@
+import { resolveNumCtx } from "#models/options.js";
+
 export interface ContextOptions {
   contextMode?: string;
   historyBytes?: string | number;
@@ -17,9 +19,7 @@ export function resolveContextOptions(
   if (mode !== "auto" && mode !== "full")
     throw new Error("context-mode must be auto or full.");
 
-  const numCtx = Number(env.OLLAMA_NUM_CTX ?? 16384);
-  if (!Number.isSafeInteger(numCtx) || numCtx <= 0)
-    throw new Error("OLLAMA_NUM_CTX must be a positive integer.");
+  const numCtx = resolveNumCtx(env.OLLAMA_NUM_CTX);
 
   const historyBytes = Number(
     options.historyBytes ?? env.PROWL_HISTORY_BYTES ?? numCtx * 2,

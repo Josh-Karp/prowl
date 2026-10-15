@@ -1,7 +1,12 @@
 import type { Tool } from "@modelcontextprotocol/client";
-import type { OllamaMessage } from "#models/ollama.js";
+import type {
+  OllamaMessage,
+  OllamaTool,
+  OllamaMetrics,
+} from "#models/ollama.js";
 import type { BrowserClient } from "#agent/context/observations.js";
 import type { ResolvedContextOptions } from "#agent/context/options.js";
+import type { ResolvedModelOptions } from "#models/options.js";
 
 import { chat, mcpToolsToOllamaTools } from "#models/ollama.js";
 import { emptyResponseRecovery, system } from "#agent/prompts.js";
@@ -15,9 +20,17 @@ import { BrowserContext } from "#agent/context/observations.js";
 import { ConversationHistory } from "#agent/context/history.js";
 import { ContextArtifacts } from "#agent/context/artifacts.js";
 import { resolveContextOptions } from "#agent/context/options.js";
+import { resolveModelOptions } from "#models/options.js";
 
 export interface AgentClient extends BrowserClient {
   listTools(): Promise<{ tools: Tool[] }>;
+}
+
+export interface AgentOptions {
+  model?: string;
+  baseUrl?: string;
+  maxIterations?: number;
+  context?: ResolvedContextOptions;
 }
 
 export interface AgentSession {
@@ -28,42 +41,31 @@ export interface AgentSession {
 
 const MAX_EMPTY_RESPONSE_RETRIES = 2;
 
-export async function runAgent(
-  client: AgentClient,
-  task: string,
-  model?: string,
-  baseUrl?: string,
-  maxIterations: number = Number(process.env.MAX_ITERATIONS ?? 30),
-  configuration?: ResolvedContextOptions,
-  session: AgentSession = { iterationsUsed: 0 },
-) {
-  if (!Number.isSafeInteger(maxIterations) || maxIterations <= 0) {
-    throw new Error("maxIterations must be a positive integer.");
-  }
+function logContextEvent(data: object) {
+  logger.debug("Context event", { data: { schemaVersion: 1, ...data } });
+}
 
-  const context = configuration ?? resolveContextOptions();
-  const automatic = context.mode === "auto";
-  const contextEvent = (data: object) =>
-    logger.debug("Context event", { data: { schemaVersion: 1, ...data } });
-  contextEvent({ kind: "context-config", ...context });
-  const startedAt = performance.now();
-  logger.debug("Starting agent", {
-    data: {
-      model: model ?? (process.env.OLLAMA_MODEL || "default"),
-      baseUrl:
-        baseUrl ?? (process.env.OLLAMA_BASE_URL || "http://localhost:11434"),
-      maxIterations,
-      contextLength: context.numCtx,
-      runIndex: session.runIndex,
-      task,
-    },
-  });
+async function discoverTools(client: AgentClient) {
   logger.info("Discovering available MCP tools...", { console: true });
+
   const { tools } = await client.listTools().catch((error) => {
     logger.error("MCP tool discovery failed", { data: error });
     throw error;
   });
+
   logger.debug(`Discovered ${tools.length} tools`, { data: tools });
+
+  return tools;
+}
+
+function createConversation(
+  client: AgentClient,
+  tools: Tool[],
+  task: string,
+  context: ResolvedContextOptions,
+  session: AgentSession,
+) {
+  const automatic = context.mode === "auto";
   const ollamaTools = [
     ...mcpToolsToOllamaTools(tools),
     ...(automatic ? contextTools : []),
@@ -79,31 +81,163 @@ export async function runAgent(
       content: task,
     },
   ];
-  const artifacts = automatic
-    ? (session.artifacts ??= new ContextArtifacts(logger.filePath))
-    : undefined;
-  const browser = automatic
-    ? new BrowserContext(client, tools, contextEvent, (value) =>
-        artifacts!.snapshot(value),
-      )
-    : undefined;
-  const history = automatic
-    ? new ConversationHistory(prefix, {
-        budget: context.historyBytes,
-        numCtx: context.numCtx,
-        event: contextEvent,
-        archive: (value) =>
-          artifacts!.history({ ...value, runIndex: session.runIndex }),
-      })
-    : undefined;
-  const fullMessages = automatic ? undefined : prefix;
+
+  let browser: BrowserContext | undefined;
+  let history: ConversationHistory | undefined;
+  if (automatic) {
+    const artifacts = (session.artifacts ??= new ContextArtifacts(
+      logger.filePath,
+    ));
+    browser = new BrowserContext(client, {
+      capabilities: tools,
+      onEvent: logContextEvent,
+      onArchive: (value) => artifacts.snapshot(value),
+    });
+    history = new ConversationHistory(prefix, {
+      budget: context.historyBytes,
+      numCtx: context.numCtx,
+      onEvent: logContextEvent,
+      onArchive: (value) =>
+        artifacts.history({ ...value, runIndex: session.runIndex }),
+    });
+  }
+
   const appendTurn = (
     displayed: OllamaMessage[],
     original: OllamaMessage[],
   ) => {
     if (history) history.appendTurn(displayed, original);
-    else fullMessages!.push(...displayed);
+    else prefix.push(...displayed);
   };
+  return {
+    ollamaTools,
+    browser,
+    history,
+    prepareMessages: (previousPromptTokens?: number) =>
+      history?.prepare(previousPromptTokens) ?? prefix,
+    appendTurn,
+  };
+}
+
+async function requestModelResponse(
+  messages: OllamaMessage[],
+  tools: OllamaTool[],
+  configuration: ResolvedModelOptions,
+  onMetrics?: (metrics: OllamaMetrics) => void,
+) {
+  logger.debug(
+    `Requesting model response with ${messages.length} messages and ${tools.length} tools`,
+  );
+
+  const modelStartedAt = performance.now();
+  const response = await chat(messages, {
+    tools,
+    onMetrics,
+    configuration,
+  }).catch((error) => {
+    logger.error(
+      `Model request failed after ${(performance.now() - modelStartedAt).toFixed(0)} ms`,
+      { data: error },
+    );
+    throw error;
+  });
+
+  logger.debug(
+    `Model response (${(performance.now() - modelStartedAt).toFixed(0)} ms, ${response.tool_calls?.length ?? 0} tool calls)`,
+    { data: response },
+  );
+
+  return response;
+}
+
+async function executeTool(
+  client: AgentClient,
+  toolCall: NonNullable<OllamaMessage["tool_calls"]>[number],
+  browser?: BrowserContext,
+  history?: ConversationHistory,
+) {
+  logger.debug("Tool arguments", { data: toolCall.function.arguments });
+
+  const toolStartedAt = performance.now();
+  const name = toolCall.function.name;
+  const args = toolCall.function.arguments;
+  const local =
+    browser && history
+      ? dispatchContextTool(name, args, browser, history)
+      : undefined;
+  const result = await (
+    local ?? client.callTool({ name, arguments: args })
+  ).catch((error) => {
+    logger.error(
+      `Tool ${toolCall.function.name} failed after ${(performance.now() - toolStartedAt).toFixed(0)} ms`,
+      { data: error },
+    );
+    throw error;
+  });
+  logger.debug(
+    `Tool ${toolCall.function.name} returned in ${(performance.now() - toolStartedAt).toFixed(0)} ms (isError: ${result.isError === true})`,
+    { data: result },
+  );
+  if (result.isError)
+    logger.warn(
+      `Tool ${toolCall.function.name} reported an error; waiting for the model's next action.`,
+      { console: true },
+    );
+
+  const displayed =
+    browser && !local ? await browser.reduce(name, args, result) : result;
+  const displayedReceipt: OllamaMessage = {
+    role: "tool",
+    tool_name: name,
+    content: JSON.stringify(displayed),
+  };
+  return {
+    receipt: displayedReceipt,
+    originalReceipt: history
+      ? { ...displayedReceipt, content: JSON.stringify(result) }
+      : displayedReceipt,
+  };
+}
+
+export async function runAgent(
+  client: AgentClient,
+  task: string,
+  options: AgentOptions = {},
+  session: AgentSession = { iterationsUsed: 0 },
+) {
+  const {
+    model,
+    baseUrl,
+    maxIterations = Number(process.env.MAX_ITERATIONS ?? 30),
+  } = options;
+  if (!Number.isSafeInteger(maxIterations) || maxIterations <= 0) {
+    throw new Error("maxIterations must be a positive integer.");
+  }
+
+  const context = options.context ?? resolveContextOptions();
+  const modelOptions = resolveModelOptions({
+    model,
+    baseUrl,
+    numCtx: context.numCtx,
+  });
+
+  logContextEvent({ kind: "context-config", ...context });
+  const startedAt = performance.now();
+
+  logger.debug("Starting agent", {
+    data: {
+      model: modelOptions.model,
+      baseUrl: modelOptions.baseUrl,
+      maxIterations,
+      contextLength: context.numCtx,
+      runIndex: session.runIndex,
+      task,
+    },
+  });
+
+  const tools = await discoverTools(client);
+  const { ollamaTools, browser, history, prepareMessages, appendTurn } =
+    createConversation(client, tools, task, context, session);
   let previousPromptTokens: number | undefined;
   let consecutiveEmptyResponses = 0;
 
@@ -114,30 +248,15 @@ export async function runAgent(
       { console: true },
     );
 
-    const messages = history?.prepare(previousPromptTokens) ?? fullMessages!;
+    const messages = prepareMessages(previousPromptTokens);
     previousPromptTokens = undefined;
-    logger.debug(
-      `Requesting model response with ${messages.length} messages and ${ollamaTools.length} tools`,
-    );
-    const modelStartedAt = performance.now();
-    const response = await chat(
+    const response = await requestModelResponse(
       messages,
       ollamaTools,
-      model,
-      baseUrl,
+      modelOptions,
       (metrics) => {
         previousPromptTokens = metrics.prompt_eval_count;
       },
-    ).catch((error) => {
-      logger.error(
-        `Model request failed after ${(performance.now() - modelStartedAt).toFixed(0)} ms`,
-        { data: error },
-      );
-      throw error;
-    });
-    logger.debug(
-      `Model response (${(performance.now() - modelStartedAt).toFixed(0)} ms, ${response.tool_calls?.length ?? 0} tool calls)`,
-      { data: response },
     );
 
     const assistant: OllamaMessage = {
@@ -145,7 +264,7 @@ export async function runAgent(
       content: response.content ?? "",
     };
     const turn: OllamaMessage[] = [assistant];
-    const originalTurn: OllamaMessage[] = history ? [assistant] : turn;
+    const originalTurn: OllamaMessage[] = [assistant];
 
     if (!response.tool_calls?.length) {
       // Empty or thinking-only responses do not indicate completion; ask the model to continue.
@@ -172,7 +291,7 @@ export async function runAgent(
           content: emptyResponseRecovery,
         };
         turn.push(recovery);
-        if (history) originalTurn.push(recovery);
+        originalTurn.push(recovery);
         appendTurn(turn, originalTurn);
         continue;
       }
@@ -193,44 +312,14 @@ export async function runAgent(
         `Executing tool ${toolIndex + 1}/${response.tool_calls.length}: ${toolCall.function.name}`,
         { console: true },
       );
-      logger.debug("Tool arguments", { data: toolCall.function.arguments });
-
-      const toolStartedAt = performance.now();
-      const name = toolCall.function.name;
-      const args = toolCall.function.arguments;
-      const local =
-        browser && history
-          ? dispatchContextTool(name, args, browser, history)
-          : undefined;
-      const result = await (
-        local ?? client.callTool({ name, arguments: args })
-      ).catch((error) => {
-        logger.error(
-          `Tool ${toolCall.function.name} failed after ${(performance.now() - toolStartedAt).toFixed(0)} ms`,
-          { data: error },
-        );
-        throw error;
-      });
-      logger.debug(
-        `Tool ${toolCall.function.name} returned in ${(performance.now() - toolStartedAt).toFixed(0)} ms (isError: ${result.isError === true})`,
-        { data: result },
+      const { receipt, originalReceipt } = await executeTool(
+        client,
+        toolCall,
+        browser,
+        history,
       );
-      if (result.isError)
-        logger.warn(
-          `Tool ${toolCall.function.name} reported an error; waiting for the model's next action.`,
-          { console: true },
-        );
-
-      const displayed =
-        browser && !local ? await browser.reduce(name, args, result) : result;
-      const receipt: OllamaMessage = {
-        role: "tool",
-        tool_name: name,
-        content: JSON.stringify(displayed),
-      };
       turn.push(receipt);
-      if (history)
-        originalTurn.push({ ...receipt, content: JSON.stringify(result) });
+      originalTurn.push(originalReceipt);
       logger.debug(
         `Added ${toolCall.function.name} result to conversation (${messages.length + turn.length} messages)`,
       );

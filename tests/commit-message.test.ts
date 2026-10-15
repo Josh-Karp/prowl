@@ -2,21 +2,13 @@ import type { TestContext } from "node:test";
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { temporaryDirectory } from "#tests/helpers.js";
 
 function messageFile(t: TestContext, message: string) {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-commit-message-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-commit-message-");
   const path = join(directory, "message with spaces");
   writeFileSync(path, message);
   return path;

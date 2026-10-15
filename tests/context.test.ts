@@ -30,12 +30,11 @@ function fixture(before = native, after = before, scoped = page(compactTree)) {
   const events: unknown[] = [];
   const archive: unknown[] = [];
   return {
-    context: new BrowserContext(
-      client,
+    context: new BrowserContext(client, {
       capabilities,
-      (event) => events.push(event),
-      (value) => archive.push(value),
-    ),
+      onEvent: (event) => events.push(event),
+      onArchive: (value) => archive.push(value),
+    }),
     calls,
     events,
     archive,
@@ -98,7 +97,7 @@ test("unsupported MCP capabilities pass through without invoking helpers", async
         throw Error("unexpected");
       },
     },
-    [tool("browser_snapshot")],
+    { capabilities: [tool("browser_snapshot")] },
   );
   assert.equal(await context.reduce("browser_snapshot", {}, full), full);
   assert.equal(f.calls.length, 0);
@@ -171,7 +170,7 @@ test("helper failures, unsupported forms, ambiguous refs and changed pages retur
           return args?.target ? page(compactTree) : fallback;
         },
       },
-      capabilities,
+      { capabilities },
     );
     assert.deepEqual(
       await context.reduce("browser_snapshot", {}, full),
@@ -187,7 +186,7 @@ test("helper failures, unsupported forms, ambiguous refs and changed pages retur
         return fallback;
       },
     },
-    capabilities,
+    { capabilities },
   );
   assert.deepEqual(
     await context.reduce("browser_snapshot", {}, full),
@@ -266,7 +265,7 @@ test("fresh fallback preserves original action receipts and refresh diagnostics 
           ? textResult('### Result\n{"fallback":"custom widget"}')
           : fresh,
     },
-    capabilities,
+    { capabilities },
   );
   const result = await context.reduce(
     "browser_click",
@@ -327,9 +326,11 @@ test("ambiguous scoped refs on a stable page require a fresh full snapshot", asy
         return call.arguments?.target ? scoped : fresh;
       },
     },
-    capabilities,
-    undefined,
-    (value) => archived.push(value),
+    {
+      capabilities,
+      onEvent: undefined,
+      onArchive: (value) => archived.push(value),
+    },
   );
   assert.deepEqual(await context.reduce("browser_snapshot", {}, full), fresh);
   assert.deepEqual(calls.at(-1), { name: "browser_snapshot", arguments: {} });
@@ -368,7 +369,7 @@ test("malformed native metadata returns fresh refs rather than stale original ev
           return args?.target ? page(compactTree) : fresh;
         },
       },
-      capabilities,
+      { capabilities },
     );
     const result = await context.reduce("browser_snapshot", {}, full);
     assert.deepEqual(result, fresh, metadata);
@@ -430,8 +431,7 @@ test("savings must reach the exact byte and percentage boundaries", async () => 
           return args?.target ? scoped : fresh;
         },
       },
-      capabilities,
-      (event) => events.push(event),
+      { capabilities, onEvent: (event) => events.push(event) },
     );
     const result = await context.reduce("browser_snapshot", {}, original);
     assert.equal(Buffer.byteLength(JSON.stringify(original)), originalBytes);
@@ -464,9 +464,11 @@ test("failed refresh propagates rather than returning stale refs or recording su
         throw failure;
       },
     },
-    capabilities,
-    (event) => events.push(event),
-    (value) => archived.push(value),
+    {
+      capabilities,
+      onEvent: (event) => events.push(event),
+      onArchive: (value) => archived.push(value),
+    },
   );
   await assert.rejects(
     context.reduce("browser_click", {}, full),
@@ -486,7 +488,7 @@ test("a failed full refresh propagates its error without reusing stale refs", as
         throw failure;
       },
     },
-    capabilities,
+    { capabilities },
   );
   await assert.rejects(
     context.reduce("browser_click", { target: "e3" }, full),

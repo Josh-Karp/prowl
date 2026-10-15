@@ -1,33 +1,18 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { connectMCPServer } from "#mcp/client.js";
 import { configureLogger, logger } from "#logger.js";
+import { temporaryDirectory, captureOutput } from "#tests/helpers.js";
 
 for (const verbose of [false, true]) {
   test(`MCP subprocess diagnostics reach the file (verbose: ${verbose})`, async (t) => {
-    const directory = mkdtempSync(join(tmpdir(), "prowl-mcp-"));
+    const directory = temporaryDirectory(t, "prowl-mcp-");
     const filePath = join(directory, "agent.log");
     configureLogger({ filePath, verbose });
-    t.after(() => {
-      configureLogger();
-      rmSync(directory, { recursive: true, force: true });
-    });
-    let stdout = "",
-      stderr = "";
-    const write = process.stdout.write.bind(process.stdout);
-    t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
-      // The isolated Node test runner sends binary events over stdout.
-      if (typeof chunk !== "string") return write(chunk);
-      stdout += chunk;
-      return true;
-    });
-    t.mock.method(process.stderr, "write", (chunk: unknown) => {
-      stderr += String(chunk);
-      return true;
-    });
+    t.after(() => configureLogger());
+    const output = captureOutput(t);
     await assert.rejects(
       connectMCPServer(process.execPath, [
         "-e",
@@ -38,8 +23,8 @@ for (const verbose of [false, true]) {
       readFileSync(logger.filePath, "utf8"),
       /MCP startup diagnostic/,
     );
-    assert.equal(stderr, "");
-    if (verbose) assert.match(stdout, /MCP startup diagnostic/);
-    else assert.equal(stdout, "");
+    assert.equal(output.stderr, "");
+    if (verbose) assert.match(output.stdout, /MCP startup diagnostic/);
+    else assert.equal(output.stdout, "");
   });
 }

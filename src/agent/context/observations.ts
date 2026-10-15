@@ -26,6 +26,12 @@ export interface ContextEvent {
   reason: string;
 }
 
+interface BrowserContextOptions {
+  capabilities: Tool[];
+  onEvent?: (event: ContextEvent) => void;
+  onArchive?: (value: BrowserResult) => void;
+}
+
 type ReductionAttempt =
   { reduced: true; result: BrowserResult } | { reduced: false; reason: string };
 
@@ -182,11 +188,9 @@ export class BrowserContext {
 
   constructor(
     private client: BrowserClient,
-    capabilities: Tool[],
-    private event: (event: ContextEvent) => void = () => {},
-    private archive: (value: BrowserResult) => void = () => {},
+    private options: BrowserContextOptions,
   ) {
-    this.supported = supportsReduction(capabilities);
+    this.supported = supportsReduction(options.capabilities);
   }
 
   async fullSnapshot(): Promise<BrowserResult> {
@@ -194,7 +198,7 @@ export class BrowserContext {
       name: "browser_snapshot",
       arguments: {},
     });
-    this.archive(result);
+    this.options.onArchive?.(result);
     return result;
   }
 
@@ -222,7 +226,7 @@ export class BrowserContext {
       );
     }
 
-    this.archive(original);
+    this.options.onArchive?.(original);
     const attempt = await this.tryReduce(original, content, originalBytes);
     if (attempt.reduced) {
       return this.record(
@@ -245,7 +249,7 @@ export class BrowserContext {
     reduced: boolean,
     reason: string,
   ): BrowserResult {
-    this.event({
+    this.options.onEvent?.({
       kind: "observation",
       originalBytes,
       returnedBytes: serializedBytes(result),

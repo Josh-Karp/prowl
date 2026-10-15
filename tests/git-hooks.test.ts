@@ -5,19 +5,16 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { temporaryDirectory } from "#tests/helpers.js";
 
 function repository(t: TestContext) {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-hooks-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-hooks-");
   mkdirSync(join(directory, ".husky"));
   mkdirSync(join(directory, "scripts"));
   for (const path of [

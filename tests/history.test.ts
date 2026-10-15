@@ -48,8 +48,8 @@ test("compaction protects exact instructions and complete tool groups, archives 
   const h = new ConversationHistory(prefix, {
     budget: 10000,
     numCtx: 16384,
-    event: (e) => events.push(e),
-    archive: (v) => archived.push(v),
+    onEvent: (e) => events.push(e),
+    onArchive: (v) => archived.push(v),
   });
   for (let i = 1; i <= 20; i++) h.appendTurn(turn(i, i === 18));
   const messages = h.prepare();
@@ -115,7 +115,7 @@ test("latest observation and tool errors survive an oversized-state budget excep
   const h = new ConversationHistory(prefix, {
     budget: 300,
     numCtx: 16384,
-    event: (e) => events.push(e),
+    onEvent: (e) => events.push(e),
   });
   h.appendTurn(turn(1, true));
   h.appendTurn(turn(2, false, true));
@@ -147,7 +147,7 @@ test("large archived arguments do not grow the checkpoint or prevent removing ot
   const h = new ConversationHistory(prefix, {
     budget: 4000,
     numCtx: 16384,
-    event: (event) => events.push(event),
+    onEvent: (event) => events.push(event),
   });
   h.appendTurn([
     {

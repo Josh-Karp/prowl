@@ -1,16 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  symlinkSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { copyFileSync, existsSync, mkdirSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { temporaryDirectory } from "#tests/helpers.js";
 
 for (const scenario of [
   { name: "HUSKY=0", env: { HUSKY: "0" }, git: true, husky: true },
@@ -25,8 +18,7 @@ for (const scenario of [
   { name: "no local Husky", env: {}, git: true, husky: false },
 ]) {
   test(`prepare skips hook setup with ${scenario.name}`, (t) => {
-    const directory = mkdtempSync(join(tmpdir(), "prowl-prepare-"));
-    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const directory = temporaryDirectory(t, "prowl-prepare-");
     mkdirSync(join(directory, "scripts"));
     copyFileSync(
       resolve("scripts/prepare.mjs"),

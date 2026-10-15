@@ -230,7 +230,7 @@ test("packed CLI works without the checkout or development dependencies", async 
       ).href;
       const probe = `
         import assert from 'node:assert/strict';
-        import { runForms } from ${JSON.stringify(runnerUrl)};
+        import { runBatch } from ${JSON.stringify(runnerUrl)};
         import { configureLogger } from ${JSON.stringify(loggerUrl)};
         configureLogger({ filePath: ${JSON.stringify(join(directory, "installed-run.log"))} });
         const requests = [];
@@ -243,7 +243,7 @@ test("packed CLI works without the checkout or development dependencies", async 
             status: 'confirmed', summary: 'Registered', evidence: 'Visible registration confirmation'
           }) } }));
         };
-        const summary = await runForms({ listTools: async () => ({ tools: [] }) }, {
+        const summary = await runBatch({ listTools: async () => ({ tools: [] }) }, {
           url: 'http://fixture/?query=preserved', runs: 2, maxIterations: 2,
           context: { mode: 'full', historyBytes: 32768, numCtx: 16384 }
         });
