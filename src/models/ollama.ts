@@ -1,4 +1,6 @@
-import { logger } from "../logger.js";
+import type { Tool } from "@modelcontextprotocol/client";
+
+import { logger } from "#logger.js";
 
 export interface OllamaMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -63,6 +65,19 @@ interface OllamaResponse extends OllamaCompletionMetadata {
       };
     }>;
   };
+}
+
+export function mcpToolsToOllamaTools(tools: Tool[]): OllamaTool[] {
+  return tools.map((tool) => ({
+    type: "function",
+    function: {
+      name: tool.name,
+      description: tool.description ?? "",
+      parameters: (tool.inputSchema as Record<string, unknown>) ?? {
+        type: "object",
+      },
+    },
+  }));
 }
 
 export async function chat(

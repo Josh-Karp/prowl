@@ -12,6 +12,14 @@
   },
   "private": true,
   "type": "module",
+  "imports": {
+    "#*.js": {
+      "development": "./src/*.ts",
+      "default": "./dist/*.js"
+    },
+    "#tests/*.js": "./tests/*.ts",
+    "#package.json": "./package.json"
+  },
   "bin": {
     "prowl": "dist/cli.js"
   },
@@ -20,20 +28,21 @@
     "scripts/prepare.mjs"
   ],
   "scripts": {
-    "test": "tsx --test tests/*.test.ts",
-    "test:package": "tsx --test tests/package.integration.ts",
+    "test": "tsx --conditions=development --test tests/*.test.ts",
+    "test:package": "tsx --conditions=development --test tests/package.integration.ts",
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.build.json",
     "prepack": "pnpm run build",
-    "demo": "tsx demo/server.ts",
-    "dev": "tsx src/index.ts",
+    "demo": "tsx --conditions=development demo/server.ts",
+    "dev": "tsx --conditions=development src/index.ts",
     "typecheck": "tsc --noEmit",
-    "prowl": "tsx src/cli.ts",
+    "prowl": "tsx --conditions=development src/cli.ts",
     "clean": "rm -rf logs .playwright-mcp dist",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
     "lint": "eslint . --max-warnings=0",
     "lint:fix": "eslint . --fix --max-warnings=0",
-    "prepare": "node scripts/prepare.mjs"
+    "prepare": "node scripts/prepare.mjs",
+    "test:context": "tsx --conditions=development --test tests/context.integration.ts"
   },
   "engines": {
     "node": "^22.22.1 || >=24"
@@ -48,7 +57,8 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.3.1",
     "commander": "15.0.0",
-    "dotenv": "^18.0.6"
+    "dotenv": "^18.0.6",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

@@ -1,15 +1,17 @@
+import type { TestContext } from "node:test";
+import type {
+  OllamaMetrics,
+  OllamaMessage,
+  OllamaTool,
+} from "#models/ollama.js";
+
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
-import {
-  chat,
-  type OllamaMetrics,
-  type OllamaMessage,
-  type OllamaTool,
-} from "../src/models/ollama.js";
+import test from "node:test";
+import { chat } from "#models/ollama.js";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { configureLogger, logger, reportError } from "../src/logger.js";
+import { configureLogger, logger, reportError } from "#logger.js";
 
 test("HTTP failure details stay in the file while the console reports only the status", async (t) => {
   const directory = mkdtempSync(join(tmpdir(), "prowl-http-error-"));

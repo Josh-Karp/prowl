@@ -3,8 +3,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { connectMCPServer } from "../src/mcp/client.js";
-import { configureLogger, logger } from "../src/logger.js";
+import { connectMCPServer } from "#mcp/client.js";
+import { configureLogger, logger } from "#logger.js";
 
 for (const verbose of [false, true]) {
   test(`MCP subprocess diagnostics reach the file (verbose: ${verbose})`, async (t) => {

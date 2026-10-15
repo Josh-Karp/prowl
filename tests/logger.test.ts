@@ -1,3 +1,5 @@
+import type { TestContext } from "node:test";
+
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -10,9 +12,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import test, { type TestContext } from "node:test";
-import { Logger, configureLogger, logger, reportError } from "../src/logger.js";
-import { ContextArtifacts } from "../src/agent/artifacts.js";
+import test from "node:test";
+import { Logger, configureLogger, logger, reportError } from "#logger.js";
+import { ContextArtifacts } from "#agent/context/artifacts.js";
 
 test("each run keeps its log, history and snapshots together in one folder", (t) => {
   const directory = mkdtempSync(join(tmpdir(), "prowl-run-folder-"));

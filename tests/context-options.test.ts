@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveContextOptions } from "../src/agent/context-options.js";
+import { resolveContextOptions } from "#agent/context/options.js";
 
 test("context defaults use automatic mode and a 32768-byte history budget", () => {
   assert.deepEqual(resolveContextOptions({}, {}), {
