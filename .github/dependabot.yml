@@ -9,6 +9,10 @@ updates:
       prefix: "fix"
       prefix-development: "chore"
       include: "scope"
+    groups:
+      all-dependencies:
+        patterns:
+          - "*"
     ignore:
       # Keep TypeScript within typescript-eslint's supported range.
       - dependency-name: "typescript"
