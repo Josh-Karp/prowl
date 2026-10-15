@@ -57,6 +57,14 @@ export interface OllamaMetrics extends Pick<
   requestBytes: number;
 }
 
+export interface ChatOptions {
+  tools?: OllamaTool[];
+  model?: string;
+  baseUrl?: string;
+  onMetrics?: (metrics: OllamaMetrics) => void;
+  configuration?: ResolvedModelOptions;
+}
+
 interface OllamaResponse extends OllamaCompletionMetadata {
   message: OllamaMessage & { role: "assistant" };
 }
@@ -76,12 +84,9 @@ export function mcpToolsToOllamaTools(tools: Tool[]): OllamaTool[] {
 
 export async function chat(
   messages: OllamaMessage[],
-  tools?: OllamaTool[],
-  model?: string,
-  baseUrl?: string,
-  onMetrics?: (metrics: OllamaMetrics) => void,
-  configuration?: ResolvedModelOptions,
+  options: ChatOptions = {},
 ): Promise<OllamaResponse["message"]> {
+  const { tools, model, baseUrl, onMetrics, configuration } = options;
   const settings = configuration ?? resolveModelOptions({ model, baseUrl });
   const { numCtx, timeoutMs } = settings;
 

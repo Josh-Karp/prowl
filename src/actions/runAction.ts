@@ -1,4 +1,4 @@
-import type { RunActionOptions } from "#actions/options.js";
+import type { RunOptions } from "#actions/options.js";
 
 import { connectPlaywright } from "#mcp/playwright.js";
 import { runBatch } from "#forms/runs.js";
@@ -6,7 +6,7 @@ import { configureLogger, logger } from "#logger.js";
 import { resolveContextOptions } from "#agent/context/options.js";
 import { resolveRunOptions } from "#actions/options.js";
 
-export async function run(options: RunActionOptions) {
+export async function run(options: RunOptions) {
   configureLogger({ filePath: options.logFile, verbose: options.verbose });
 
   const { url, runs, maxIterations } = resolveRunOptions(options);
