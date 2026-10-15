@@ -1,6 +1,8 @@
 import type { Tool } from "@modelcontextprotocol/client";
+import type { ResolvedModelOptions } from "#models/options.js";
 
 import { logger } from "#logger.js";
+import { resolveModelOptions } from "#models/options.js";
 
 export interface OllamaMessage {
   role: "system" | "user" | "assistant" | "tool";
@@ -38,33 +40,25 @@ interface OllamaCompletionMetadata {
   eval_duration?: number;
 }
 
-export interface OllamaMetrics {
+export interface OllamaMetrics extends Pick<
+  OllamaCompletionMetadata,
+  | "prompt_eval_count"
+  | "prompt_eval_cached_count"
+  | "prompt_eval_duration"
+  | "eval_count"
+  | "eval_duration"
+  | "total_duration"
+  | "load_duration"
+> {
   kind: "inference";
   numCtx: number;
   messagesBytes: number;
   toolsBytes: number;
   requestBytes: number;
-  prompt_eval_count?: number;
-  prompt_eval_cached_count?: number;
-  prompt_eval_duration?: number;
-  eval_count?: number;
-  eval_duration?: number;
-  total_duration?: number;
-  load_duration?: number;
 }
 
 interface OllamaResponse extends OllamaCompletionMetadata {
-  message: {
-    role: "assistant";
-    content: string;
-    thinking?: string;
-    tool_calls?: Array<{
-      function: {
-        name: string;
-        arguments: Record<string, unknown>;
-      };
-    }>;
-  };
+  message: OllamaMessage & { role: "assistant" };
 }
 
 export function mcpToolsToOllamaTools(tools: Tool[]): OllamaTool[] {
@@ -83,41 +77,33 @@ export function mcpToolsToOllamaTools(tools: Tool[]): OllamaTool[] {
 export async function chat(
   messages: OllamaMessage[],
   tools?: OllamaTool[],
-  model: string = process.env.OLLAMA_MODEL || "gemma4:12b",
-  baseUrl: string = process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+  model?: string,
+  baseUrl?: string,
   onMetrics?: (metrics: OllamaMetrics) => void,
+  configuration?: ResolvedModelOptions,
 ): Promise<OllamaResponse["message"]> {
-  const numCtx = Number(process.env.OLLAMA_NUM_CTX ?? 16384);
-  if (!Number.isSafeInteger(numCtx) || numCtx <= 0) {
-    throw new Error("OLLAMA_NUM_CTX must be a positive integer.");
-  }
-  const timeoutMs = Number(process.env.OLLAMA_TIMEOUT_MS ?? 120000);
-  if (
-    !Number.isSafeInteger(timeoutMs) ||
-    timeoutMs <= 0 ||
-    timeoutMs > 2147483647
-  ) {
-    throw new Error(
-      "OLLAMA_TIMEOUT_MS must be a positive integer no greater than 2147483647.",
-    );
-  }
+  const settings = configuration ?? resolveModelOptions({ model, baseUrl });
+  const { numCtx, timeoutMs } = settings;
 
   const body = JSON.stringify({
-    model,
+    model: settings.model,
     messages,
     tools,
     stream: false,
     options: { num_ctx: numCtx },
   });
 
-  const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/chat`, {
-    method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      "Content-Type": "application/json",
+  const response = await fetch(
+    `${settings.baseUrl.replace(/\/+$/, "")}/api/chat`,
+    {
+      method: "POST",
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body,
     },
-    body,
-  });
+  );
 
   if (!response.ok) {
     throw new Error(`Ollama request failed: ${response.status}`, {

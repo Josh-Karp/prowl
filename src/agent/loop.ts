@@ -6,6 +6,7 @@ import type {
 } from "#models/ollama.js";
 import type { BrowserClient } from "#agent/context/observations.js";
 import type { ResolvedContextOptions } from "#agent/context/options.js";
+import type { ResolvedModelOptions } from "#models/options.js";
 
 import { chat, mcpToolsToOllamaTools } from "#models/ollama.js";
 import { emptyResponseRecovery, system } from "#agent/prompts.js";
@@ -19,6 +20,7 @@ import { BrowserContext } from "#agent/context/observations.js";
 import { ConversationHistory } from "#agent/context/history.js";
 import { ContextArtifacts } from "#agent/context/artifacts.js";
 import { resolveContextOptions } from "#agent/context/options.js";
+import { resolveModelOptions } from "#models/options.js";
 
 export interface AgentClient extends BrowserClient {
   listTools(): Promise<{ tools: Tool[] }>;
@@ -113,8 +115,7 @@ function createConversation(
 async function requestModelResponse(
   messages: OllamaMessage[],
   tools: OllamaTool[],
-  model?: string,
-  baseUrl?: string,
+  configuration: ResolvedModelOptions,
   onMetrics?: (metrics: OllamaMetrics) => void,
 ) {
   logger.debug(
@@ -122,15 +123,20 @@ async function requestModelResponse(
   );
 
   const modelStartedAt = performance.now();
-  const response = await chat(messages, tools, model, baseUrl, onMetrics).catch(
-    (error) => {
-      logger.error(
-        `Model request failed after ${(performance.now() - modelStartedAt).toFixed(0)} ms`,
-        { data: error },
-      );
-      throw error;
-    },
-  );
+  const response = await chat(
+    messages,
+    tools,
+    undefined,
+    undefined,
+    onMetrics,
+    configuration,
+  ).catch((error) => {
+    logger.error(
+      `Model request failed after ${(performance.now() - modelStartedAt).toFixed(0)} ms`,
+      { data: error },
+    );
+    throw error;
+  });
 
   logger.debug(
     `Model response (${(performance.now() - modelStartedAt).toFixed(0)} ms, ${response.tool_calls?.length ?? 0} tool calls)`,
@@ -203,15 +209,19 @@ export async function runAgent(
   }
 
   const context = configuration ?? resolveContextOptions();
+  const modelOptions = resolveModelOptions({
+    model,
+    baseUrl,
+    numCtx: context.numCtx,
+  });
 
   logContextEvent({ kind: "context-config", ...context });
   const startedAt = performance.now();
 
   logger.debug("Starting agent", {
     data: {
-      model: model ?? (process.env.OLLAMA_MODEL || "default"),
-      baseUrl:
-        baseUrl ?? (process.env.OLLAMA_BASE_URL || "http://localhost:11434"),
+      model: modelOptions.model,
+      baseUrl: modelOptions.baseUrl,
       maxIterations,
       contextLength: context.numCtx,
       runIndex: session.runIndex,
@@ -237,8 +247,7 @@ export async function runAgent(
     const response = await requestModelResponse(
       messages,
       ollamaTools,
-      model,
-      baseUrl,
+      modelOptions,
       (metrics) => {
         previousPromptTokens = metrics.prompt_eval_count;
       },

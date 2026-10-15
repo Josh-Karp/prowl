@@ -451,6 +451,7 @@ function contextAgent(
   const requests: Array<{
     messages: OllamaMessage[];
     tools: Array<{ function: { name: string } }>;
+    options: { num_ctx: number };
   }> = [];
   const executed: string[] = [];
   t.mock.method(globalThis, "fetch", async (_url, options) => {
@@ -697,10 +698,14 @@ test("local full snapshot execution failures propagate", async (t) => {
 
 test("provider pressure is consumed once and resolved options override environment settings", async (t) => {
   const priorMode = process.env.PROWL_CONTEXT_MODE;
+  const priorNumCtx = process.env.OLLAMA_NUM_CTX;
   process.env.PROWL_CONTEXT_MODE = "invalid";
+  process.env.OLLAMA_NUM_CTX = "invalid";
   t.after(() => {
     if (priorMode === undefined) delete process.env.PROWL_CONTEXT_MODE;
     else process.env.PROWL_CONTEXT_MODE = priorMode;
+    if (priorNumCtx === undefined) delete process.env.OLLAMA_NUM_CTX;
+    else process.env.OLLAMA_NUM_CTX = priorNumCtx;
   });
   const a = contextAgent(t, [
     ...Array.from({ length: 3 }, () => ({
@@ -714,7 +719,169 @@ test("provider pressure is consumed once and resolved options override environme
     { message: { content: "Completed" } },
   ]);
   await a.run({ mode: "auto", historyBytes: 1000000, numCtx: 1000 });
+  assert.ok(a.requests.every((request) => request.options.num_ctx === 1000));
   const checkpoint = a.requests[4].messages[3];
   assert.equal(checkpoint.tool_name, "prowl_browser_history");
   assert.deepEqual(a.requests[5].messages[3], checkpoint);
+});
+
+for (const explicit of [false, true]) {
+  test(`agent requests and logs share a model snapshot across discovery (explicit: ${explicit})`, async (t) => {
+    const path = logFile(t);
+    t.mock.method(process.stdout, "write", () => true);
+    const env = {
+      OLLAMA_MODEL: "environment-model",
+      OLLAMA_BASE_URL: "http://environment:11434///",
+      OLLAMA_NUM_CTX: "32768",
+      OLLAMA_TIMEOUT_MS: "1000",
+      PROWL_CONTEXT_MODE: "auto",
+    };
+    for (const [key, value] of Object.entries(env)) {
+      const prior = process.env[key];
+      process.env[key] = value;
+      t.after(() => {
+        if (prior === undefined) delete process.env[key];
+        else process.env[key] = prior;
+      });
+    }
+    const requests: Array<{
+      url: unknown;
+      model: string;
+      options: { num_ctx: number };
+    }> = [];
+    t.mock.method(globalThis, "fetch", async (url, options) => {
+      requests.push({ url, ...JSON.parse(options.body as string) });
+      return new Response(
+        JSON.stringify({
+          message: { role: "assistant", content: "Completed" },
+        }),
+      );
+    });
+    const client = {
+      listTools: async () => {
+        process.env.OLLAMA_MODEL = "changed-model";
+        process.env.OLLAMA_BASE_URL = "http://changed";
+        process.env.OLLAMA_NUM_CTX = "invalid";
+        process.env.OLLAMA_TIMEOUT_MS = "0";
+        return { tools: [] };
+      },
+    };
+    await runAgent(
+      client,
+      "Inspect the form",
+      explicit ? "explicit-model" : undefined,
+      explicit ? "http://explicit///" : undefined,
+      1,
+    );
+    assert.equal(requests.length, 1);
+    assert.equal(
+      requests[0].model,
+      explicit ? "explicit-model" : "environment-model",
+    );
+    assert.equal(
+      requests[0].url,
+      explicit
+        ? "http://explicit/api/chat"
+        : "http://environment:11434/api/chat",
+    );
+    assert.equal(requests[0].options.num_ctx, 32768);
+    const records = readFileSync(path, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    const started = records.find(
+      (record) => record.message === "Starting agent",
+    ).data;
+    assert.equal(started.model, requests[0].model);
+    assert.equal(
+      started.baseUrl,
+      explicit ? "http://explicit///" : "http://environment:11434///",
+    );
+    assert.equal(started.contextLength, 32768);
+    assert.deepEqual(
+      records.find((record) => record.data?.kind === "context-config").data,
+      {
+        schemaVersion: 1,
+        kind: "context-config",
+        mode: "auto",
+        historyBytes: 65536,
+        numCtx: 32768,
+      },
+    );
+  });
+}
+
+test("agent logs the fallback model actually requested", async (t) => {
+  const path = logFile(t);
+  const prior = process.env.OLLAMA_MODEL;
+  delete process.env.OLLAMA_MODEL;
+  t.after(() => {
+    if (prior === undefined) delete process.env.OLLAMA_MODEL;
+    else process.env.OLLAMA_MODEL = prior;
+  });
+  t.mock.method(process.stdout, "write", () => true);
+  let requestedModel: string | undefined;
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    requestedModel = JSON.parse(options.body as string).model;
+    return new Response(
+      JSON.stringify({ message: { role: "assistant", content: "Completed" } }),
+    );
+  });
+  await runAgent(
+    { listTools: async () => ({ tools: [] }) },
+    "Inspect",
+    undefined,
+    undefined,
+    1,
+  );
+  const records = readFileSync(path, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(requestedModel, "gemma4:12b");
+  assert.equal(
+    records.find((record) => record.message === "Starting agent").data.model,
+    "gemma4:12b",
+  );
+});
+
+test("invalid resolved context windows and request deadlines never reach the provider", async (t) => {
+  logFile(t);
+  t.mock.method(process.stdout, "write", () => true);
+  let requests = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    requests++;
+    return new Response(
+      JSON.stringify({ message: { role: "assistant", content: "Completed" } }),
+    );
+  });
+  const client = { listTools: async () => ({ tools: [] }) };
+  for (const numCtx of [
+    0,
+    -1,
+    1.5,
+    NaN,
+    Infinity,
+    Number.MAX_SAFE_INTEGER + 1,
+  ]) {
+    await assert.rejects(
+      runAgent(client, "Inspect", undefined, undefined, 1, {
+        mode: "full",
+        historyBytes: 1000,
+        numCtx,
+      }),
+      /OLLAMA_NUM_CTX/,
+    );
+  }
+  const prior = process.env.OLLAMA_TIMEOUT_MS;
+  process.env.OLLAMA_TIMEOUT_MS = "2147483648";
+  t.after(() => {
+    if (prior === undefined) delete process.env.OLLAMA_TIMEOUT_MS;
+    else process.env.OLLAMA_TIMEOUT_MS = prior;
+  });
+  await assert.rejects(
+    runAgent(client, "Inspect", undefined, undefined, 1),
+    /OLLAMA_TIMEOUT_MS/,
+  );
+  assert.equal(requests, 0);
 });
