@@ -87,12 +87,12 @@ test("a stalled model request is aborted by the configured deadline", async (t) 
           ),
         100,
       );
-      const abort = () => {
+      const onAbort = () => {
         clearTimeout(timer);
         reject(options?.signal?.reason);
       };
-      if (options?.signal?.aborted) abort();
-      else options?.signal?.addEventListener("abort", abort, { once: true });
+      if (options?.signal?.aborted) onAbort();
+      else options?.signal?.addEventListener("abort", onAbort, { once: true });
     });
   try {
     await assert.rejects(chat([]), /timed out|timeout/i);
