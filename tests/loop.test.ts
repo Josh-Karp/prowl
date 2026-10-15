@@ -83,14 +83,9 @@ test("preserves tool conversation and logs full payloads while showing concise p
   };
 
   try {
-    await runAgent(
-      client,
-      "Register John Smith",
-      undefined,
-      undefined,
-      undefined,
-      { mode: "full", historyBytes: 32768, numCtx: 16384 },
-    );
+    await runAgent(client, "Register John Smith", {
+      context: { mode: "full", historyBytes: 32768, numCtx: 16384 },
+    });
     assert.equal(existsSync(join(dirname(path), "history.jsonl")), false);
     assert.equal(requests.length, 2);
     assert.deepEqual(requests[1].messages[2], {
@@ -162,7 +157,7 @@ test("an explicit iteration limit overrides MAX_ITERATIONS", async (t) => {
   };
 
   try {
-    await runAgent(client, "Inspect the form", undefined, undefined, 2);
+    await runAgent(client, "Inspect the form", { maxIterations: 2 });
   } finally {
     if (originalLimit === undefined) delete process.env.MAX_ITERATIONS;
     else process.env.MAX_ITERATIONS = originalLimit;
@@ -189,13 +184,9 @@ test("verbose mode includes model details in both console and file", async (t) =
         }),
       ),
   );
-  await runAgent(
-    { listTools: async () => ({ tools: [] }) },
-    "Detailed task",
-    undefined,
-    undefined,
-    1,
-  );
+  await runAgent({ listTools: async () => ({ tools: [] }) }, "Detailed task", {
+    maxIterations: 1,
+  });
   assert.match(output.stdout, /Verbose model reasoning/);
   assert.match(output.stdout, /Detailed task/);
   assert.match(output.stdout, /Ollama completion metadata/);
@@ -255,7 +246,7 @@ function scriptedAgent(
     output,
     client,
     run: (maxIterations: number) =>
-      runAgent(client, "Inspect the form", undefined, undefined, maxIterations),
+      runAgent(client, "Inspect the form", { maxIterations }),
   };
 }
 
@@ -275,20 +266,14 @@ test("a shared session cannot reset the iteration allowance between fresh conver
   await runAgent(
     agent.client,
     "First task",
-    undefined,
-    undefined,
-    2,
-    context,
+    { maxIterations: 2, context },
     session,
   );
   await assert.rejects(
     runAgent(
       agent.client,
       "Second task",
-      undefined,
-      undefined,
-      2,
-      context,
+      { maxIterations: 2, context },
       session,
     ),
     /Agent exceeded maximum iterations/,
@@ -486,14 +471,10 @@ function contextAgent(
         numCtx: 16384,
       },
     ) =>
-      runAgent(
-        client,
-        "Inspect and submit once",
-        undefined,
-        undefined,
-        replies.length,
+      runAgent(client, "Inspect and submit once", {
+        maxIterations: replies.length,
         context,
-      ),
+      }),
   };
 }
 
@@ -756,13 +737,11 @@ for (const explicit of [false, true]) {
         return { tools: [] };
       },
     };
-    await runAgent(
-      client,
-      "Inspect the form",
-      explicit ? "explicit-model" : undefined,
-      explicit ? "http://explicit///" : undefined,
-      1,
-    );
+    await runAgent(client, "Inspect the form", {
+      model: explicit ? "explicit-model" : undefined,
+      baseUrl: explicit ? "http://explicit///" : undefined,
+      maxIterations: 1,
+    });
     assert.equal(requests.length, 1);
     assert.equal(
       requests[0].model,
@@ -817,13 +796,9 @@ test("agent logs the fallback model actually requested", async (t) => {
       JSON.stringify({ message: { role: "assistant", content: "Completed" } }),
     );
   });
-  await runAgent(
-    { listTools: async () => ({ tools: [] }) },
-    "Inspect",
-    undefined,
-    undefined,
-    1,
-  );
+  await runAgent({ listTools: async () => ({ tools: [] }) }, "Inspect", {
+    maxIterations: 1,
+  });
   const records = readFileSync(path, "utf8")
     .trim()
     .split("\n")
@@ -855,10 +830,13 @@ test("invalid resolved context windows and request deadlines never reach the pro
     Number.MAX_SAFE_INTEGER + 1,
   ]) {
     await assert.rejects(
-      runAgent(client, "Inspect", undefined, undefined, 1, {
-        mode: "full",
-        historyBytes: 1000,
-        numCtx,
+      runAgent(client, "Inspect", {
+        maxIterations: 1,
+        context: {
+          mode: "full",
+          historyBytes: 1000,
+          numCtx,
+        },
       }),
       /OLLAMA_NUM_CTX/,
     );
@@ -870,7 +848,7 @@ test("invalid resolved context windows and request deadlines never reach the pro
     else process.env.OLLAMA_TIMEOUT_MS = prior;
   });
   await assert.rejects(
-    runAgent(client, "Inspect", undefined, undefined, 1),
+    runAgent(client, "Inspect", { maxIterations: 1 }),
     /OLLAMA_TIMEOUT_MS/,
   );
   assert.equal(requests, 0);

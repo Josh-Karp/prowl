@@ -239,9 +239,12 @@ test("reports provider usage and UTF-8 request sizes without changing the assist
   );
   const metrics: OllamaMetrics[] = [];
   assert.deepEqual(
-    await chat(messages, tools, "model", "http://localhost:11434", (value) =>
-      metrics.push(value),
-    ),
+    await chat(messages, {
+      tools,
+      model: "model",
+      baseUrl: "http://localhost:11434",
+      onMetrics: (value) => metrics.push(value),
+    }),
     message,
   );
   assert.equal(metrics.length, 1);
@@ -277,9 +280,11 @@ test("omits absent usage fields and sizes absent tools as an empty list", async 
       ),
   );
   const metrics: OllamaMetrics[] = [];
-  await chat([], undefined, "model", "http://localhost:11434", (value) =>
-    metrics.push(value),
-  );
+  await chat([], {
+    model: "model",
+    baseUrl: "http://localhost:11434",
+    onMetrics: (value) => metrics.push(value),
+  });
   assert.equal(metrics.length, 1);
   assert.equal(metrics[0].toolsBytes, 2);
   assert.equal(metrics[0].messagesBytes, 2);
@@ -307,9 +312,12 @@ test("excludes negative nonfinite and nonnumeric provider usage while retaining 
       ),
   );
   const metrics: OllamaMetrics[] = [];
-  await chat([], [], "model", "http://localhost:11434", (value) =>
-    metrics.push(value),
-  );
+  await chat([], {
+    tools: [],
+    model: "model",
+    baseUrl: "http://localhost:11434",
+    onMetrics: (value) => metrics.push(value),
+  });
   assert.equal(metrics.length, 1);
   assert.equal(metrics[0].load_duration, 0);
   for (const field of [

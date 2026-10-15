@@ -8,7 +8,7 @@ import { formTask } from "#forms/prompts.js";
 
 export type FormRunResult = z.infer<typeof reportSchema> & { runIndex: number };
 
-interface FormRunOptions {
+interface BatchOptions {
   url: string;
   runs: number;
   maxIterations: number;
@@ -18,7 +18,7 @@ interface FormRunOptions {
   baseUrl?: string;
 }
 
-interface FormRunSummary {
+interface BatchSummary {
   requestedRuns: number;
   iterationsUsed: number;
   results: FormRunResult[];
@@ -62,7 +62,7 @@ function logRunResult(result: FormRunResult, requestedRuns: number) {
   logger.info(report.join("\n"), { console: true });
 }
 
-function logRunSummary(summary: FormRunSummary, maxIterations: number) {
+function logRunSummary(summary: BatchSummary, maxIterations: number) {
   logger.debug("Form runs summary", { data: summary });
 
   const confirmed = summary.results.filter(
@@ -75,10 +75,10 @@ function logRunSummary(summary: FormRunSummary, maxIterations: number) {
   );
 }
 
-export async function runBatch(client: AgentClient, options: FormRunOptions) {
+export async function runBatch(client: AgentClient, options: BatchOptions) {
   const { runs, maxIterations } = options;
   const session: AgentSession = { iterationsUsed: 0 };
-  const summary: FormRunSummary = {
+  const summary: BatchSummary = {
     requestedRuns: runs,
     iterationsUsed: 0,
     results: [],
@@ -105,10 +105,7 @@ export async function runBatch(client: AgentClient, options: FormRunOptions) {
       const report = await runAgent(
         client,
         formTask(url, runs, instructions, runIndex),
-        model,
-        baseUrl,
-        maxIterations,
-        context,
+        { model, baseUrl, maxIterations, context },
         session,
       );
       result = parseReport(report, runIndex);

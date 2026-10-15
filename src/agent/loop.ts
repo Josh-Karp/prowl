@@ -26,6 +26,13 @@ export interface AgentClient extends BrowserClient {
   listTools(): Promise<{ tools: Tool[] }>;
 }
 
+export interface AgentOptions {
+  model?: string;
+  baseUrl?: string;
+  maxIterations?: number;
+  context?: ResolvedContextOptions;
+}
+
 export interface AgentSession {
   iterationsUsed: number;
   artifacts?: ContextArtifacts;
@@ -123,14 +130,11 @@ async function requestModelResponse(
   );
 
   const modelStartedAt = performance.now();
-  const response = await chat(
-    messages,
+  const response = await chat(messages, {
     tools,
-    undefined,
-    undefined,
     onMetrics,
     configuration,
-  ).catch((error) => {
+  }).catch((error) => {
     logger.error(
       `Model request failed after ${(performance.now() - modelStartedAt).toFixed(0)} ms`,
       { data: error },
@@ -198,17 +202,19 @@ async function executeTool(
 export async function runAgent(
   client: AgentClient,
   task: string,
-  model?: string,
-  baseUrl?: string,
-  maxIterations: number = Number(process.env.MAX_ITERATIONS ?? 30),
-  configuration?: ResolvedContextOptions,
+  options: AgentOptions = {},
   session: AgentSession = { iterationsUsed: 0 },
 ) {
+  const {
+    model,
+    baseUrl,
+    maxIterations = Number(process.env.MAX_ITERATIONS ?? 30),
+  } = options;
   if (!Number.isSafeInteger(maxIterations) || maxIterations <= 0) {
     throw new Error("maxIterations must be a positive integer.");
   }
 
-  const context = configuration ?? resolveContextOptions();
+  const context = options.context ?? resolveContextOptions();
   const modelOptions = resolveModelOptions({
     model,
     baseUrl,
