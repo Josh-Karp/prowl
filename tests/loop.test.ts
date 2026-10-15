@@ -4,9 +4,8 @@ import type { ResolvedContextOptions } from "#agent/context/options.js";
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { runAgent } from "#agent/loop.js";
 import {
   capabilities,
@@ -17,26 +16,23 @@ import {
   textResult,
 } from "#tests/fixtures/context.js";
 import { configureLogger, logger } from "#logger.js";
+import {
+  temporaryDirectory,
+  readJsonLines,
+  captureOutput,
+} from "#tests/helpers.js";
 
 function logFile(t: TestContext, verbose = false) {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-loop-"));
+  const directory = temporaryDirectory(t, "prowl-loop-");
   const path = join(directory, "agent.log");
   configureLogger({ filePath: path, verbose });
-  t.after(() => {
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
+  t.after(() => configureLogger());
   return logger.filePath;
 }
 
 test("preserves tool conversation and logs full payloads while showing concise progress", async (t) => {
   const path = logFile(t);
-  let output = "";
-  t.mock.method(process.stdout, "write", (chunk: unknown) => {
-    output += String(chunk);
-    return true;
-  });
-  const originalFetch = globalThis.fetch;
+  const output = captureOutput(t);
   const originalLimit = process.env.MAX_ITERATIONS;
   process.env.MAX_ITERATIONS = "2";
   const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
@@ -57,7 +53,7 @@ test("preserves tool conversation and logs full payloads while showing concise p
     ],
   };
 
-  globalThis.fetch = async (_url, options) => {
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
     requests.push(JSON.parse(options!.body as string));
     return new Response(
       JSON.stringify({
@@ -78,7 +74,7 @@ test("preserves tool conversation and logs full payloads while showing concise p
             : { role: "assistant", content: "Ready to fill the form." },
       }),
     );
-  };
+  });
   const client = {
     listTools: async () => ({
       tools: [{ name: "browser_navigate", inputSchema: { type: "object" } }],
@@ -108,22 +104,20 @@ test("preserves tool conversation and logs full payloads while showing concise p
       tool_name: "browser_navigate",
       content: JSON.stringify(browserResult),
     });
-    assert.match(output, /Iteration 1\/2/);
-    assert.match(output, /browser_navigate/);
-    assert.match(output, /Final response/);
+    assert.match(output.stdout, /Iteration 1\/2/);
+    assert.match(output.stdout, /browser_navigate/);
+    assert.match(output.stdout, /Final response/);
     assert.doesNotMatch(
-      output,
+      output.stdout,
       /Inspect the form first|Page snapshot|tool_calls|Register John Smith|Ollama completion metadata|prompt_eval_count|eval_count|done_reason/,
     );
     const logs = readFileSync(path, "utf8");
     assert.match(logs, /Inspect the form first/);
     assert.match(logs, /Page snapshot/);
     assert.match(logs, /Register John Smith/);
-    const metadata = logs
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line))
-      .filter((record) => record.message === "Ollama completion metadata");
+    const metadata = readJsonLines(path).filter(
+      (record) => record.message === "Ollama completion metadata",
+    );
     assert.deepEqual(
       metadata.map((record) => record.data),
       [
@@ -144,7 +138,6 @@ test("preserves tool conversation and logs full payloads while showing concise p
       ],
     );
   } finally {
-    globalThis.fetch = originalFetch;
     if (originalLimit === undefined) delete process.env.MAX_ITERATIONS;
     else process.env.MAX_ITERATIONS = originalLimit;
   }
@@ -152,15 +145,18 @@ test("preserves tool conversation and logs full payloads while showing concise p
 
 test("an explicit iteration limit overrides MAX_ITERATIONS", async (t) => {
   logFile(t);
-  const originalFetch = globalThis.fetch;
   const originalLimit = process.env.MAX_ITERATIONS;
   process.env.MAX_ITERATIONS = "0";
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
-        message: { role: "assistant", content: "Completed." },
-      }),
-    );
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify({
+          message: { role: "assistant", content: "Completed." },
+        }),
+      ),
+  );
   const client = {
     listTools: async () => ({ tools: [] }),
   };
@@ -168,7 +164,6 @@ test("an explicit iteration limit overrides MAX_ITERATIONS", async (t) => {
   try {
     await runAgent(client, "Inspect the form", undefined, undefined, 2);
   } finally {
-    globalThis.fetch = originalFetch;
     if (originalLimit === undefined) delete process.env.MAX_ITERATIONS;
     else process.env.MAX_ITERATIONS = originalLimit;
   }
@@ -176,50 +171,42 @@ test("an explicit iteration limit overrides MAX_ITERATIONS", async (t) => {
 
 test("verbose mode includes model details in both console and file", async (t) => {
   const path = logFile(t, true);
-  const originalFetch = globalThis.fetch;
-  let output = "";
-  t.mock.method(process.stdout, "write", (chunk: unknown) => {
-    output += String(chunk);
-    return true;
-  });
-  globalThis.fetch = async () =>
-    new Response(
-      JSON.stringify({
-        done: true,
-        done_reason: "stop",
-        eval_count: 15,
-        message: {
-          role: "assistant",
-          content: "Completed.",
-          thinking: "Verbose model reasoning",
-        },
-      }),
-    );
-  try {
-    await runAgent(
-      { listTools: async () => ({ tools: [] }) },
-      "Detailed task",
-      undefined,
-      undefined,
-      1,
-    );
-    assert.match(output, /Verbose model reasoning/);
-    assert.match(output, /Detailed task/);
-    assert.match(output, /Ollama completion metadata/);
-    assert.match(output, /eval_count: 15/);
-    const records = readFileSync(path, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
-    assert.deepEqual(
-      records.find((record) => record.message === "Ollama completion metadata")
-        .data,
-      { done: true, done_reason: "stop", eval_count: 15 },
-    );
-    assert.match(readFileSync(path, "utf8"), /Verbose model reasoning/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const output = captureOutput(t);
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () =>
+      new Response(
+        JSON.stringify({
+          done: true,
+          done_reason: "stop",
+          eval_count: 15,
+          message: {
+            role: "assistant",
+            content: "Completed.",
+            thinking: "Verbose model reasoning",
+          },
+        }),
+      ),
+  );
+  await runAgent(
+    { listTools: async () => ({ tools: [] }) },
+    "Detailed task",
+    undefined,
+    undefined,
+    1,
+  );
+  assert.match(output.stdout, /Verbose model reasoning/);
+  assert.match(output.stdout, /Detailed task/);
+  assert.match(output.stdout, /Ollama completion metadata/);
+  assert.match(output.stdout, /eval_count: 15/);
+  const records = readJsonLines(path);
+  assert.deepEqual(
+    records.find((record) => record.message === "Ollama completion metadata")
+      .data,
+    { done: true, done_reason: "stop", eval_count: 15 },
+  );
+  assert.match(readFileSync(path, "utf8"), /Verbose model reasoning/);
 });
 
 const recoveryMessage =
@@ -243,13 +230,7 @@ function scriptedAgent(
   const toolResult = {
     content: [{ type: "text", text: "Observed browser state" }],
   };
-  let output = "";
-  for (const stream of [process.stdout, process.stderr]) {
-    t.mock.method(stream, "write", (chunk: unknown) => {
-      output += String(chunk);
-      return true;
-    });
-  }
+  const output = captureOutput(t);
   t.mock.method(globalThis, "fetch", async (_url, options) => {
     requests.push(JSON.parse(options.body as string));
     const response = responses[requests.length - 1];
@@ -271,7 +252,7 @@ function scriptedAgent(
     requests,
     executedTools,
     path,
-    output: () => output,
+    output,
     client,
     run: (maxIterations: number) =>
       runAgent(client, "Inspect the form", undefined, undefined, maxIterations),
@@ -341,13 +322,14 @@ for (const [name, response] of [
       role: "user",
       content: recoveryMessage,
     });
-    assert.match(agent.output(), /recovery attempt 1\/2/);
-    assert.match(agent.output(), /recovery attempt 2\/2/);
+    assert.match(agent.output.stderr, /recovery attempt 1\/2/);
+    assert.match(agent.output.stderr, /recovery attempt 2\/2/);
     assert.match(
-      agent.output(),
+      agent.output.stdout,
       /Final response:\n {2}Blocked: required information is unavailable\.\n/,
     );
-    assert.doesNotMatch(agent.output(), /I will select the city/);
+    assert.doesNotMatch(agent.output.stdout, /I will select the city/);
+    assert.doesNotMatch(agent.output.stderr, /I will select the city/);
     assert.equal(agent.executedTools.length, 0);
   });
 }
@@ -385,9 +367,12 @@ for (const verbose of [false, true]) {
     assert.match(logs, /I will select the city/);
     assert.match(logs, /Observed browser state/);
     assert.match(logs, /recovery attempt 1\/2/);
-    assert.match(agent.output(), /recovery attempt 1\/2/);
-    if (verbose) assert.match(agent.output(), /I will select the city/);
-    else assert.doesNotMatch(agent.output(), /I will select the city/);
+    assert.match(agent.output.stderr, /recovery attempt 1\/2/);
+    if (verbose) assert.match(agent.output.stdout, /I will select the city/);
+    else {
+      assert.doesNotMatch(agent.output.stdout, /I will select the city/);
+      assert.doesNotMatch(agent.output.stderr, /I will select the city/);
+    }
   });
 }
 
@@ -399,7 +384,8 @@ for (const maxIterations of [3, 8]) {
       /^Error: Model returned an empty response without tool calls after 2 recovery attempts\.$/,
     );
     assert.equal(agent.requests.length, 3);
-    assert.doesNotMatch(agent.output(), /Final response|Agent finished/);
+    assert.doesNotMatch(agent.output.stdout, /Final response|Agent finished/);
+    assert.doesNotMatch(agent.output.stderr, /Final response|Agent finished/);
     assert.doesNotMatch(readFileSync(agent.path, "utf8"), /Agent finished/);
   });
 }
@@ -419,8 +405,8 @@ test("tool calls reset consecutive empty-response recovery attempts", async (t) 
   await agent.run(6);
   assert.equal(agent.requests.length, 6);
   assert.equal(agent.executedTools.length, 1);
-  assert.equal(agent.output().match(/recovery attempt 1\/2/g)?.length, 2);
-  assert.equal(agent.output().match(/recovery attempt 2\/2/g)?.length, 2);
+  assert.equal(agent.output.stderr.match(/recovery attempt 1\/2/g)?.length, 2);
+  assert.equal(agent.output.stderr.match(/recovery attempt 2\/2/g)?.length, 2);
 });
 
 for (const maxIterations of [1, 2]) {
@@ -432,10 +418,17 @@ for (const maxIterations of [1, 2]) {
     );
     assert.equal(agent.requests.length, maxIterations);
     assert.equal(
-      agent.output().match(/recovery attempt/g)?.length ?? 0,
+      agent.output.stderr.match(/recovery attempt/g)?.length ?? 0,
       maxIterations - 1,
     );
-    assert.doesNotMatch(agent.output(), /recovery attempt 2\/2|Final response/);
+    assert.doesNotMatch(
+      agent.output.stdout,
+      /recovery attempt 2\/2|Final response/,
+    );
+    assert.doesNotMatch(
+      agent.output.stderr,
+      /recovery attempt 2\/2|Final response/,
+    );
   });
 }
 
@@ -552,10 +545,7 @@ test("automatic mode reduces observations, strips thinking, and retrieves exact 
     a.executed.some((name) => name.startsWith("prowl_")),
     false,
   );
-  const archive = readFileSync(join(dirname(a.path), "history.jsonl"), "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+  const archive = readJsonLines(join(dirname(a.path), "history.jsonl"));
   assert.equal(archive.length, 4);
   assert.match(JSON.stringify(archive[0]), /Useful guide/);
   assert.match(JSON.stringify(archive[0]), /exact diagnostic thinking/);

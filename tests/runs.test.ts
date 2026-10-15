@@ -2,18 +2,16 @@ import type { TestContext } from "node:test";
 import type { OllamaMessage } from "#models/ollama.js";
 
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { runBatch } from "#forms/runs.js";
 import { configureLogger, logger } from "#logger.js";
+import {
+  temporaryDirectory,
+  readJsonLines,
+  captureOutput,
+} from "#tests/helpers.js";
 
 const toolCall = (name = "browser_snapshot") => ({
   content: "",
@@ -30,20 +28,11 @@ const confirmed = (reference: string) => ({
 });
 
 function fixture(t: TestContext, replies: Partial<OllamaMessage>[]) {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-runs-"));
+  const directory = temporaryDirectory(t, "prowl-runs-");
   configureLogger({ filePath: join(directory, "agent.log") });
   const path = logger.filePath;
-  t.after(() => {
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
-  let output = "";
-  for (const stream of [process.stdout, process.stderr]) {
-    t.mock.method(stream, "write", (chunk: unknown) => {
-      output += String(chunk);
-      return true;
-    });
-  }
+  t.after(() => configureLogger());
+  const output = captureOutput(t);
   const requests: Array<{ messages: OllamaMessage[] }> = [];
   const executed: string[] = [];
   t.mock.method(globalThis, "fetch", async (_url, options) => {
@@ -79,12 +68,8 @@ function fixture(t: TestContext, replies: Partial<OllamaMessage>[]) {
     requests,
     executed,
     client,
-    output: () => output,
-    records: () =>
-      readFileSync(path, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line)),
+    output,
+    records: () => readJsonLines(path),
     run: (runs = 3, maxIterations = 30, mode: "auto" | "full" = "auto") =>
       runBatch(client, {
         url: "http://fixture/?runId=exact&step=1",
@@ -251,10 +236,7 @@ test("automatic runs share an artifact writer while history turn IDs are run-sco
     readFileSync(join(folder, "snapshot-0002.json"), "utf8"),
     /observation-2/,
   );
-  const history = readFileSync(join(folder, "history.jsonl"), "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+  const history = readJsonLines(join(folder, "history.jsonl"));
   assert.deepEqual(
     history.map((turn) => [turn.runIndex, turn.id]),
     [
@@ -319,7 +301,8 @@ test("normal run output shows confirmation evidence and reference IDs without ra
     },
   ]);
   await a.run(1, 1);
-  assert.match(a.output(), /Customer registered successfully\./);
-  assert.match(a.output(), /DEMO-EXACT-123/);
-  assert.doesNotMatch(a.output(), /"status"\s*:/);
+  assert.match(a.output.stdout, /Customer registered successfully\./);
+  assert.match(a.output.stdout, /DEMO-EXACT-123/);
+  assert.doesNotMatch(a.output.stdout, /"status"\s*:/);
+  assert.doesNotMatch(a.output.stderr, /"status"\s*:/);
 });
