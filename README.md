@@ -86,6 +86,12 @@ pnpm test:package
 
 The regular tests need no live Ollama or browser. Run `pnpm test:package` for changes to the build, package contents, dependencies, CLI entry point, or installed paths. Checkout-only contributor guidance is in [AGENTS.md](AGENTS.md).
 
+## Automated releases
+
+The Release workflow uses Release Please v5 (Node.js 24) to open release PRs on pushes to `main` and create GitHub releases when those PRs merge. Both workflows use `ubuntu-24.04` to avoid automatic OS migrations of `ubuntu-latest`.
+
+Under **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests**. If Release Please reports that GitHub Actions is not permitted to create or approve pull requests, enable this setting and rerun the failed workflow. The workflow's `pull-requests: write` permission alone does not enable this repository setting; default workflow permissions can remain read-only.
+
 ## Local installation
 
 Prowl is distributed as a local tarball; registry publishing is disabled. After `pnpm install`, create and install the current version from the repository root:
