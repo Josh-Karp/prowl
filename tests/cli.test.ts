@@ -45,6 +45,40 @@ function singleLog(basePath: string) {
   return paths[0];
 }
 
+test("entry points reject Node versions below 24 before doing any work", (t) => {
+  const directory = temporaryDirectory(t);
+  for (const entry of ["src/cli.ts", "src/index.ts"]) {
+    for (const version of ["22.22.1", "23.11.0"]) {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--conditions=development",
+          "--import",
+          "tsx",
+          "--input-type=module",
+          "-e",
+          `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} }); await import(${JSON.stringify(new URL(`../${entry}`, import.meta.url).href)});`,
+          "--",
+          "--help",
+        ],
+        {
+          encoding: "utf8",
+          timeout: 10_000,
+          env: {
+            ...process.env,
+            LOG_FILE: join(directory, "runtime.log"),
+            MAX_ITERATIONS: "0",
+          },
+        },
+      );
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Prowl requires Node\.js 24 or higher/);
+      assert.equal(result.stdout, "");
+    }
+  }
+  assert.deepEqual(readdirSync(directory), []);
+});
+
 test("run validates the positional form URL", (t) => {
   const filePath = join(temporaryDirectory(t), "url.log");
   const result = run("src/cli.ts", ["run", "file:///tmp/form.html"], filePath);

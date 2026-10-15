@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import "#runtime.js";
 import "dotenv/config";
 import { Command } from "commander";
 import { runAction } from "#actions/runAction.js";

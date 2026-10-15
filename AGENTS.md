@@ -4,7 +4,7 @@ Prowl is a TypeScript ESM CLI that uses an Ollama model and Playwright MCP to fi
 
 ## Setup and verification
 
-- Use the Node range in `package.json` (`^22.22.1 || >=24`) and pnpm for repository dependencies. Keep `pnpm-lock.yaml` in sync with manifest changes; npm is used for packing and consumer installation.
+- Use the Node range in `package.json` (`>=24`) and pnpm for repository dependencies. Keep `pnpm-lock.yaml` in sync with manifest changes; npm is used for packing and consumer installation.
 - Install with `pnpm install`. Set up a local `.env` from `.env.example` only when running a live task; choose a model tag available on your Ollama service.
 - For code changes, run `pnpm typecheck`, `pnpm test`, `pnpm lint`, and `pnpm format:check`. Documentation-only changes need formatting and verification of the documented commands and paths.
 - Run `pnpm test:package` when changing the build, package contents, runtime dependencies, CLI entry point, or paths used by installed modules. This test uses a temporary npm prefix; do not substitute an installation into the machine's real global prefix for routine verification.

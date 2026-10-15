@@ -160,6 +160,31 @@ test("packed CLI works without the checkout or development dependencies", async 
     assert.deepEqual(readdirSync(workingDirectory), []);
   });
 
+  await t.test("installed CLI requires Node 24 or higher", () => {
+    const cliUrl = pathToFileURL(join(installation, "dist/cli.js")).href;
+    for (const version of ["22.22.1", "23.11.0", "24.0.0", "26.0.0"]) {
+      const result = run(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `Object.defineProperty(process.versions, 'node', { value: ${JSON.stringify(version)} }); process.argv = ['node', 'prowl', '--help']; await import(${JSON.stringify(cliUrl)});`,
+        ],
+        workingDirectory,
+      );
+      if (version === "22.22.1" || version === "23.11.0") {
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /Prowl requires Node\.js 24 or higher/);
+        assert.equal(result.stdout, "");
+      } else {
+        assert.equal(result.status, 0, result.stderr);
+        assert.match(result.stdout, /Usage: prowl/);
+        assert.equal(result.stderr, "");
+      }
+    }
+    assert.deepEqual(readdirSync(workingDirectory), []);
+  });
+
   await t.test(
     "compiled context modules load with direct Zod available",
     () => {
