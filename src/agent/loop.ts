@@ -73,26 +73,25 @@ function createConversation(
     },
   ];
 
-  const artifacts = automatic
-    ? (session.artifacts ??= new ContextArtifacts(logger.filePath))
-    : undefined;
-  const browser = automatic
-    ? new BrowserContext(client, {
-        capabilities: tools,
-        onEvent: logContextEvent,
-        onArchive: (value) => artifacts!.snapshot(value),
-      })
-    : undefined;
-
-  const history = automatic
-    ? new ConversationHistory(prefix, {
-        budget: context.historyBytes,
-        numCtx: context.numCtx,
-        onEvent: logContextEvent,
-        onArchive: (value) =>
-          artifacts!.history({ ...value, runIndex: session.runIndex }),
-      })
-    : undefined;
+  let browser: BrowserContext | undefined;
+  let history: ConversationHistory | undefined;
+  if (automatic) {
+    const artifacts = (session.artifacts ??= new ContextArtifacts(
+      logger.filePath,
+    ));
+    browser = new BrowserContext(client, {
+      capabilities: tools,
+      onEvent: logContextEvent,
+      onArchive: (value) => artifacts.snapshot(value),
+    });
+    history = new ConversationHistory(prefix, {
+      budget: context.historyBytes,
+      numCtx: context.numCtx,
+      onEvent: logContextEvent,
+      onArchive: (value) =>
+        artifacts.history({ ...value, runIndex: session.runIndex }),
+    });
+  }
 
   const appendTurn = (
     displayed: OllamaMessage[],
@@ -250,7 +249,7 @@ export async function runAgent(
       content: response.content ?? "",
     };
     const turn: OllamaMessage[] = [assistant];
-    const originalTurn: OllamaMessage[] = history ? [assistant] : turn;
+    const originalTurn: OllamaMessage[] = [assistant];
 
     if (!response.tool_calls?.length) {
       // Empty or thinking-only responses do not indicate completion; ask the model to continue.
@@ -277,7 +276,7 @@ export async function runAgent(
           content: emptyResponseRecovery,
         };
         turn.push(recovery);
-        if (history) originalTurn.push(recovery);
+        originalTurn.push(recovery);
         appendTurn(turn, originalTurn);
         continue;
       }
@@ -305,7 +304,7 @@ export async function runAgent(
         history,
       );
       turn.push(receipt);
-      if (history) originalTurn.push(originalReceipt);
+      originalTurn.push(originalReceipt);
       logger.debug(
         `Added ${toolCall.function.name} result to conversation (${messages.length + turn.length} messages)`,
       );
