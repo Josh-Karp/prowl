@@ -109,6 +109,7 @@ export async function chat(
     stream: false,
     options: { num_ctx: numCtx },
   });
+
   const response = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/chat`, {
     method: "POST",
     signal: AbortSignal.timeout(timeoutMs),
@@ -125,6 +126,7 @@ export async function chat(
   }
 
   const data = (await response.json()) as OllamaResponse;
+
   logger.debug("Ollama completion metadata", {
     data: {
       model: data.model,
@@ -140,6 +142,7 @@ export async function chat(
       eval_duration: data.eval_duration,
     },
   });
+
   const metrics: OllamaMetrics = {
     kind: "inference",
     numCtx,
@@ -147,6 +150,7 @@ export async function chat(
     toolsBytes: Buffer.byteLength(JSON.stringify(tools ?? [])),
     requestBytes: Buffer.byteLength(body),
   };
+
   for (const key of [
     "prompt_eval_count",
     "prompt_eval_cached_count",
@@ -160,6 +164,7 @@ export async function chat(
     if (typeof value === "number" && Number.isFinite(value) && value >= 0)
       metrics[key] = value;
   }
+
   logger.debug("Context event", { data: { schemaVersion: 1, ...metrics } });
   onMetrics?.(metrics);
   return data.message;
