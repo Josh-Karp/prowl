@@ -16,12 +16,12 @@ Installed users do not need pnpm, TypeScript, or tsx. Contributors also need pnp
 Prowl is distributed as a local package tarball. Build one using the [packaging steps](#packaging), or install a supplied tarball:
 
 ```bash
-npm install --global /path/to/prowl-0.2.0.tgz
+npm install --global /path/to/prowl-VERSION.tgz
 prowl --help
 prowl run --help
 ```
 
-The filename follows the version in `package.json`; `prowl-0.2.0.tgz` is the current example. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
+Replace `VERSION` with the archive's version. The filename follows the version in `package.json`. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
 
 Run Prowl from your project directory. It loads `.env` from that directory, not from the installed package. For example:
 
@@ -199,8 +199,9 @@ After installing the development dependencies:
 
 ```bash
 npm pack --dry-run         # Inspect the package contents; lifecycle scripts may rebuild dist
-npm pack                   # Creates prowl-0.2.0.tgz
-npm install --global ./prowl-0.2.0.tgz
+npm pack                   # Creates prowl-VERSION.tgz using package.json's version
+package_version=$(node -p "require('./package.json').version")
+npm install --global "./prowl-$package_version.tgz"
 prowl --help
 ```
 
@@ -231,4 +232,24 @@ Before each commit, lint-staged applies ESLint fixes and Prettier to staged file
 
 The commit-message hook removes standalone AI `Authored-by` / `Co-authored-by` footers and generated-by/with signatures identifying Claude (including Code, Opus, Sonnet and Haiku variants), ChatGPT, Codex, Copilot, Cursor, or Gemini. Human coauthors, unknown identities, prose, and quoted examples are preserved. Recognized identities are defined in `scripts/clean-commit-message.mjs`.
 
-[Dependabot](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) checks dependencies every Monday using `.github/dependabot.yml`, updating the root manifest and pnpm lockfile. The configuration excludes TypeScript updates at 6.1.0 or above to keep the configured typescript-eslint compatibility boundary. It takes effect on the GitHub repository's default branch. No version-bump or release workflow is configured.
+After cleanup, commitlint validates the message using `commitlint.config.js`. Use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/), for example `fix: handle empty model responses`, `feat(cli): add a new option`, or `docs: clarify setup`. Mark breaking changes with `!`, such as `feat!: change CLI arguments`, or a `BREAKING CHANGE:` footer. Malformed messages block the commit. Merge commits are also rejected; use squash merges for PRs.
+
+The **PR title** workflow checks titles on PR creation, edits, reopening, and new commits. Use a conventional title and squash merge so it becomes the commit on `main`; individual branch commits are not checked by CI. The check passes the title as data to commitlint and has read-only repository permissions.
+
+### Automated releases
+
+The **Release** workflow runs on pushes to `main` and can be started manually from Actions. [Release Please](https://github.com/googleapis/release-please-action) opens or updates a release PR with a `package.json` version bump, `CHANGELOG.md`, and its version manifest. Merging that PR creates a `vVERSION` tag and GitHub Release. It does not publish to npm or build/upload a tarball; use the packaging commands above.
+
+Release tracking starts at `0.2.0`, with the existing main commit as the bootstrap boundary so previously released changes are excluded. `fix` commits produce patch bumps, `feat` commits produce minor bumps, and breaking changes produce major bumps, including from `0.x` to `1.0.0`. Other types such as `docs`, `chore`, and `ci` do not normally trigger releases. Runtime dependency updates from Dependabot use `fix(deps)`; development updates use `chore(deps-dev)`.
+
+Both workflows use standard `ubuntu-latest` GitHub-hosted runners, which are [free for public repositories](https://docs.github.com/en/billing/concepts/product-billing/github-actions). They configure no Actions artifact uploads or dependency caches and require no paid service or personal access token.
+
+One-time repository setup after merging this configuration:
+
+1. Under **Settings → Actions → General → Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests** so the built-in `GITHUB_TOKEN` can open release PRs.
+2. Under **Settings → General → Pull Requests**, allow squash merging, select **Pull request title** as its default commit message, and disable merge commits and rebase merging to keep conventional titles in `main` history. Retain `!` in titles when squash merging breaking changes; a footer in an individual commit may be dropped.
+3. After the title workflow has run, add an active branch ruleset targeting `main` that requires a pull request and the **Conventional PR title** status check. A personal repo can leave required approvals at zero. Avoid bypassing the rules or editing squash commit titles to invalid messages.
+
+Local hooks can be bypassed, so the required GitHub check and squash settings complete enforcement. These repository settings are not applied by the workflow files. With the built-in token, workflows on generated release PRs can require manual approval or may not start automatically; approve the pending run, or close and reopen the release PR yourself to trigger checks. See [GitHub's workflow-trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+
+[Dependabot](https://docs.github.com/en/code-security/reference/supply-chain-security/dependabot-options-reference) checks dependencies every Monday using `.github/dependabot.yml`, updating the root manifest and pnpm lockfile. The configuration excludes TypeScript updates at 6.1.0 or above to keep the configured typescript-eslint compatibility boundary. It takes effect on the GitHub repository's default branch.
