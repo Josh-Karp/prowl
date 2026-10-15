@@ -1,15 +1,52 @@
+import type { TestContext } from "node:test";
+
 import assert from "node:assert/strict";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import test, { type TestContext } from "node:test";
-import { Logger, configureLogger, logger, reportError } from "../src/logger.js";
+import { basename, dirname, join } from "node:path";
+import test from "node:test";
+import { Logger, configureLogger, logger, reportError } from "#logger.js";
+import { ContextArtifacts } from "#agent/context/artifacts.js";
+
+test("each run keeps its log, history and snapshots together in one folder", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-run-folder-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const paths: string[] = [];
+  for (const value of ["first", "second"]) {
+    const log = new Logger({ filePath: join(directory, "custom.log") });
+    const runDirectory = dirname(log.filePath);
+    assert.equal(dirname(runDirectory), directory);
+    assert.match(basename(runDirectory), /^custom-\d{4}-\d{2}-\d{2}T/);
+    assert.equal(basename(log.filePath), "custom.log");
+    assert.equal(existsSync(runDirectory), false);
+    log.info(value);
+    const artifacts = new ContextArtifacts(log.filePath);
+    artifacts.history({ value });
+    artifacts.snapshot({ value });
+    assert.deepEqual(readdirSync(runDirectory).sort(), [
+      "custom.log",
+      "history.jsonl",
+      "snapshot-0001.json",
+    ]);
+    assert.equal(
+      JSON.parse(readFileSync(join(runDirectory, "history.jsonl"), "utf8"))
+        .value,
+      value,
+    );
+    paths.push(log.filePath);
+  }
+  assert.notEqual(dirname(paths[0]), dirname(paths[1]));
+  assert.match(readFileSync(paths[0], "utf8"), /first/);
+  assert.doesNotMatch(readFileSync(paths[0], "utf8"), /second/);
+});
 
 function capture(t: TestContext) {
   let stdout = "",
@@ -110,7 +147,8 @@ test("each logger run gets a separate file and preserves previous logs", (t) => 
   assert.match(output.stdout, /Response.*detailed-value/s);
   assert.match(output.stderr, /Slow.*50/s);
   assert.notEqual(earlier.filePath, log.filePath);
-  assert.match(log.filePath, /agent-\d{4}-\d{2}-\d{2}T.*\.log$/);
+  assert.match(dirname(log.filePath), /agent-\d{4}-\d{2}-\d{2}T/);
+  assert.equal(basename(log.filePath), "agent.log");
   assert.equal(readFileSync(filePath, "utf8"), "Legacy log\n");
   assert.equal(
     readFileSync(earlier.filePath, "utf8").trim().split("\n").length,
@@ -185,6 +223,7 @@ test("an existing generated filename is never overwritten or appended to", (t) =
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   capture(t);
   const log = new Logger({ filePath: join(directory, "agent.log") });
+  mkdirSync(dirname(log.filePath), { recursive: true });
   writeFileSync(log.filePath, "Existing run\n");
   assert.throws(() => log.info("New run"), /Unable to write log file/);
   assert.equal(readFileSync(log.filePath, "utf8"), "Existing run\n");
@@ -210,4 +249,65 @@ test("an unwritable destination fails visibly once without recursive reporting",
   reportError(failure);
   assert.match(output.stderr, /Unable to write log file/);
   assert.equal(output.stderr.trim().split("\n").length, 1);
+});
+
+test("context artifacts create files lazily, append history and number snapshots", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-artifact-writes-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const runDirectory = join(directory, "run");
+  const artifacts = new ContextArtifacts(join(runDirectory, "custom.log"));
+  assert.equal(artifacts.directory, runDirectory);
+  assert.equal(existsSync(runDirectory), false);
+  artifacts.history({ turn: 1, content: "first\nreceipt" });
+  artifacts.history({ turn: 2, content: "second receipt" });
+  artifacts.snapshot({ ref: "e1" });
+  artifacts.snapshot({ ref: "e2" });
+  assert.deepEqual(readdirSync(runDirectory).sort(), [
+    "history.jsonl",
+    "snapshot-0001.json",
+    "snapshot-0002.json",
+  ]);
+  assert.deepEqual(
+    readFileSync(join(runDirectory, "history.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line)),
+    [
+      { turn: 1, content: "first\nreceipt" },
+      { turn: 2, content: "second receipt" },
+    ],
+  );
+  for (const [filename, expected] of [
+    ["snapshot-0001.json", { ref: "e1" }],
+    ["snapshot-0002.json", { ref: "e2" }],
+  ] as const) {
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(runDirectory, filename), "utf8")),
+      expected,
+    );
+  }
+});
+
+test("context artifacts preserve existing history and snapshots on collisions", (t) => {
+  const directory = mkdtempSync(join(tmpdir(), "prowl-artifact-collisions-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const logPath = join(directory, "custom.log");
+  const first = new ContextArtifacts(logPath);
+  first.history({ content: "original history" });
+  first.snapshot({ content: "original snapshot" });
+  const second = new ContextArtifacts(logPath);
+  assert.throws(() => second.history({ content: "replacement" }), {
+    code: "EEXIST",
+  });
+  assert.throws(() => second.snapshot({ content: "replacement" }), {
+    code: "EEXIST",
+  });
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(directory, "history.jsonl"), "utf8")),
+    { content: "original history" },
+  );
+  assert.deepEqual(
+    JSON.parse(readFileSync(join(directory, "snapshot-0001.json"), "utf8")),
+    { content: "original snapshot" },
+  );
 });

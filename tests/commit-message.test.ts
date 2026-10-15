@@ -1,3 +1,5 @@
+import type { TestContext } from "node:test";
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -10,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 
 function messageFile(t: TestContext, message: string) {
   const directory = mkdtempSync(join(tmpdir(), "prowl-commit-message-"));

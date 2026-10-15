@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
+
 const npm = process.platform === "win32" ? "npm.cmd" : "npm";
 
 test("packed CLI works without the checkout or development dependencies", async (t) => {
@@ -70,6 +71,17 @@ test("packed CLI works without the checkout or development dependencies", async 
       for (const required of [
         "dist/cli.js",
         "dist/actions/runAction.js",
+        "dist/actions/options.js",
+        "dist/forms/runs.js",
+        "dist/forms/prompts.js",
+        "dist/agent/prompts.js",
+        "dist/models/ollama.js",
+        "dist/agent/context/artifacts.js",
+        "dist/agent/context/observations.js",
+        "dist/agent/context/nativeForm.js",
+        "dist/agent/context/history.js",
+        "dist/agent/context/options.js",
+        "dist/agent/context/tools.js",
         "dist/mcp/client.js",
         "scripts/prepare.mjs",
         "package.json",
@@ -86,6 +98,21 @@ test("packed CLI works without the checkout or development dependencies", async 
         assert.ok(!file.endsWith(".ts"), `TypeScript source included: ${file}`);
       }
       assert.ok(!files.includes("dist/obsolete.js"));
+      for (const oldPath of [
+        "dist/agent/runs.js",
+        "dist/agent/tools.js",
+        "dist/agent/toolMapping.js",
+        "dist/agent/context-options.js",
+        "dist/agent/artifacts.js",
+        "dist/agent/history.js",
+        "dist/agent/context.js",
+        "dist/agent/nativeForm.js",
+      ]) {
+        assert.ok(
+          !files.includes(oldPath),
+          `obsolete module included: ${oldPath}`,
+        );
+      }
       assert.equal(existsSync(join(root, "dist/obsolete.js")), false);
     },
   );
@@ -134,6 +161,80 @@ test("packed CLI works without the checkout or development dependencies", async 
   });
 
   await t.test(
+    "compiled context modules load with direct Zod available",
+    () => {
+      const contextUrl = pathToFileURL(
+        join(installation, "dist/agent/context/observations.js"),
+      ).href;
+      const historyUrl = pathToFileURL(
+        join(installation, "dist/agent/context/history.js"),
+      ).href;
+      const manifestUrl = pathToFileURL(
+        join(installation, "package.json"),
+      ).href;
+      const probe = `
+      import assert from 'node:assert/strict';
+      import { createRequire } from 'node:module';
+      import { BrowserContext } from ${JSON.stringify(contextUrl)};
+      import { ConversationHistory } from ${JSON.stringify(historyUrl)};
+      const require = createRequire(${JSON.stringify(manifestUrl)});
+      assert.equal(require('#package.json').dependencies.zod, '4.6.5');
+      assert.equal(require('zod').z.string().safeParse('available').success, true);
+      assert.equal(typeof BrowserContext, 'function');
+      const history = new ConversationHistory([], { budget: 1000, numCtx: 1000 });
+      history.appendTurn([{ role: 'assistant', content: 'Exact original', thinking: 'retained' }]);
+      assert.equal(history.prepare()[0].thinking, undefined);
+      assert.equal(history.retrieve({ turnId: 1 }).messages[0].thinking, 'retained');
+    `;
+      success(
+        process.execPath,
+        ["--input-type=module", "-e", probe],
+        workingDirectory,
+      );
+    },
+  );
+
+  await t.test(
+    "installed form runner uses fresh conversations and a shared iteration count",
+    () => {
+      const runnerUrl = pathToFileURL(
+        join(installation, "dist/forms/runs.js"),
+      ).href;
+      const loggerUrl = pathToFileURL(
+        join(installation, "dist/logger.js"),
+      ).href;
+      const probe = `
+        import assert from 'node:assert/strict';
+        import { runForms } from ${JSON.stringify(runnerUrl)};
+        import { configureLogger } from ${JSON.stringify(loggerUrl)};
+        configureLogger({ filePath: ${JSON.stringify(join(directory, "installed-run.log"))} });
+        const requests = [];
+        globalThis.fetch = async (_url, options) => {
+          const request = JSON.parse(options.body);
+          requests.push(request);
+          assert.equal(request.messages.length, 2);
+          assert.match(request.messages[1].content, new RegExp('Run ' + requests.length + ' of 2'));
+          return new Response(JSON.stringify({ message: { role: 'assistant', content: JSON.stringify({
+            status: 'confirmed', summary: 'Registered', evidence: 'Visible registration confirmation'
+          }) } }));
+        };
+        const summary = await runForms({ listTools: async () => ({ tools: [] }) }, {
+          url: 'http://fixture/?query=preserved', runs: 2, maxIterations: 2,
+          context: { mode: 'full', historyBytes: 32768, numCtx: 16384 }
+        });
+        assert.equal(requests.length, 2);
+        assert.equal(summary.iterationsUsed, 2);
+        assert.deepEqual(summary.results.map(result => result.status), ['confirmed', 'confirmed']);
+      `;
+      success(
+        process.execPath,
+        ["--input-type=module", "-e", probe],
+        workingDirectory,
+      );
+    },
+  );
+
+  await t.test(
     "installed command handles validation and working-directory configuration",
     () => {
       writeFileSync(
@@ -153,9 +254,15 @@ test("packed CLI works without the checkout or development dependencies", async 
       );
       const logs = readdirSync(join(workingDirectory, "logs"));
       assert.equal(logs.length, 1);
-      assert.match(logs[0], /^local-.*\.log$/);
+      assert.match(logs[0], /^local-\d{4}-\d{2}-\d{2}T/);
+      assert.deepEqual(readdirSync(join(workingDirectory, "logs", logs[0])), [
+        "local.log",
+      ]);
       const record = JSON.parse(
-        readFileSync(join(workingDirectory, "logs", logs[0]), "utf8"),
+        readFileSync(
+          join(workingDirectory, "logs", logs[0], "local.log"),
+          "utf8",
+        ),
       );
       assert.equal(record.level, "error");
       assert.match(record.data.stack, /maxIterations/);

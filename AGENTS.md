@@ -12,20 +12,23 @@ Prowl is a TypeScript ESM CLI that uses an Ollama model and Playwright MCP to fi
 
 ## Code layout and conventions
 
-- `src/cli.ts` parses CLI options; `src/index.ts` is the development entry point. Both call `src/actions/runAction.ts`, which validates inputs, configures logging, connects Playwright, runs the agent, and closes the client.
-- `src/agent/` contains the shared tool loop, form prompts, and MCP-to-Ollama tool mapping. Multiple submissions share one conversation and iteration budget; completion and confirmation are model-driven.
-- `src/models/ollama.ts` owns model requests. `src/mcp/` owns MCP connections and the Playwright subprocess. Keep the MCP version derived from `package.json` rather than introducing another version literal.
-- Preserve ESM and NodeNext resolution: local TypeScript imports use `.js` extensions. Keep `#!/usr/bin/env node` at the start of the CLI entry point.
+- `src/cli.ts` parses CLI options; `src/index.ts` is the development entry point. Both call `src/actions/runAction.ts`, which configures logging, resolves inputs through `src/actions/options.ts`, connects Playwright, invokes the form runner, and closes the client.
+- `src/forms/runs.ts` schedules sequential registrations, validates structured outcomes, and stops on blocked or uncertain results. `src/forms/prompts.ts` owns the form task and result-format instructions. Each registration gets a fresh conversation; runs share one iteration budget and artifact writer. Confirmation interpretation remains model-driven.
+- `src/agent/loop.ts` owns model/tool execution and empty-response recovery. `src/agent/prompts.ts` contains browser-agent and recovery guidance.
+- `src/agent/context/` contains context options, conversation history/checkpoints, artifact persistence, browser observation reduction, native form extraction, and context tools. `observations.ts` owns the browser reducer; `tools.ts` keeps local-tool schemas, dispatch, and automatic-context instructions together.
+- `src/models/ollama.ts` owns model requests and maps MCP tools to Ollama definitions. `src/mcp/` owns MCP connections and the Playwright subprocess. Keep the MCP version derived from `package.json` rather than introducing another version literal.
+- Preserve ESM and NodeNext resolution: local TypeScript imports use `#` or `#tests/` aliases with `.js` extensions, defined by `package.json` imports. Development scripts enable the `development` condition to load source; installed commands resolve `#` to compiled output. Keep `#!/usr/bin/env node` at the start of the CLI entry point.
+- Put `import type` declarations first, separated from value imports by a blank line. Use separate type imports instead of inline `type` specifiers, and place type aliases and interfaces immediately after imports, before executable code. ESLint enforces this order.
 - Use `src/logger.ts` for application logging. Detailed payloads go into the file; use `{ console: true }` for visible progress and `reportError` at entry points to avoid duplicate error output. Preserve separate log files across invocations.
 - Tests use `node:test` through tsx. `tests/*.test.ts` is the normal suite; `tests/package.integration.ts` runs separately through `pnpm test:package`. Use local fixtures for subprocess and protocol checks rather than relying on a live model or website.
 
 ## Packaging and generated files
 
 - `tsconfig.json` checks source and demo without emitting. `tsconfig.build.json` compiles only `src` into `dist`; builds remove stale `dist` output first.
-- The installed `prowl` command points to `dist/cli.js`. Preserve the relative package metadata lookup from compiled modules when changing the output layout.
+- The installed `prowl` command points to `dist/cli.js`. Preserve the `#package.json` metadata alias and the compiled `#` targets when changing the output layout.
 - `npm pack` runs the build through `prepack`. Keep the package allowlist limited to runtime output and `scripts/prepare.mjs`; npm also includes package metadata and README. Contributor guidance, source, tests, demos, and environment files belong in the checkout.
 - `scripts/prepare.mjs` sets up Husky only in a development checkout with the dependency present, outside CI/production and without `HUSKY=0`. Preserve those guards so installed users do not need Husky.
-- `dist/`, `*.tgz`, logs, Playwright artifacts, and `node_modules/` are generated and ignored. Edit source and rebuild instead of editing generated JavaScript. `pnpm clean` removes default logs and Playwright artifacts, not build output or tarballs.
+- `dist/`, `*.tgz`, logs, Playwright artifacts, and `node_modules/` are generated and ignored. Edit source and rebuild instead of editing generated JavaScript. `pnpm clean` removes default logs, Playwright artifacts, and build output; it retains tarballs.
 - Publishing is disabled with `private: true`. Keep README installation and packing instructions aligned with the current local-tarball distribution method and version.
 
 ## Maintenance

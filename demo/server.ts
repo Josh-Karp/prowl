@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
-import { logger, reportError } from "../src/logger.js";
+import { logger, reportError } from "#logger.js";
 
 async function startDemo() {
   const html = await readFile(new URL("./index.html", import.meta.url));

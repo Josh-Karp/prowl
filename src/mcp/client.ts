@@ -1,9 +1,9 @@
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { createRequire } from "node:module";
-import { logger, reportError } from "../logger.js";
+import { logger, reportError } from "#logger.js";
 
-const { version } = createRequire(import.meta.url)("../../package.json");
+const { version } = createRequire(import.meta.url)("#package.json");
 
 export async function connectMCPServer(command: string, args: string[]) {
   const client = new Client({

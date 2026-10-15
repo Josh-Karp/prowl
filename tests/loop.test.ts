@@ -1,12 +1,22 @@
+import type { TestContext } from "node:test";
+import type { OllamaMessage } from "#models/ollama.js";
+import type { ResolvedContextOptions } from "#agent/context/options.js";
+
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import test from "node:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import type { Client } from "@modelcontextprotocol/client";
-import type { OllamaMessage } from "../src/models/ollama.js";
-import { runAgent } from "../src/agent/loop.js";
-import { configureLogger, logger } from "../src/logger.js";
+import { runAgent } from "#agent/loop.js";
+import {
+  capabilities,
+  native,
+  page,
+  full,
+  compactTree,
+  textResult,
+} from "#tests/fixtures/context.js";
+import { configureLogger, logger } from "#logger.js";
 
 function logFile(t: TestContext, verbose = false) {
   const directory = mkdtempSync(join(tmpdir(), "prowl-loop-"));
@@ -74,10 +84,18 @@ test("preserves tool conversation and logs full payloads while showing concise p
       tools: [{ name: "browser_navigate", inputSchema: { type: "object" } }],
     }),
     callTool: async () => browserResult,
-  } as unknown as Client;
+  };
 
   try {
-    await runAgent(client, "Register John Smith");
+    await runAgent(
+      client,
+      "Register John Smith",
+      undefined,
+      undefined,
+      undefined,
+      { mode: "full", historyBytes: 32768, numCtx: 16384 },
+    );
+    assert.equal(existsSync(join(dirname(path), "history.jsonl")), false);
     assert.equal(requests.length, 2);
     assert.deepEqual(requests[1].messages[2], {
       role: "assistant",
@@ -145,7 +163,7 @@ test("an explicit iteration limit overrides MAX_ITERATIONS", async (t) => {
     );
   const client = {
     listTools: async () => ({ tools: [] }),
-  } as unknown as Client;
+  };
 
   try {
     await runAgent(client, "Inspect the form", undefined, undefined, 2);
@@ -179,7 +197,7 @@ test("verbose mode includes model details in both console and file", async (t) =
     );
   try {
     await runAgent(
-      { listTools: async () => ({ tools: [] }) } as unknown as Client,
+      { listTools: async () => ({ tools: [] }) },
       "Detailed task",
       undefined,
       undefined,
@@ -248,16 +266,57 @@ function scriptedAgent(
       executedTools.push(call);
       return toolResult;
     },
-  } as unknown as Client;
+  };
   return {
     requests,
     executedTools,
     path,
     output: () => output,
+    client,
     run: (maxIterations: number) =>
       runAgent(client, "Inspect the form", undefined, undefined, maxIterations),
   };
 }
+
+test("returns the final model report to the form-run orchestrator", async (t) => {
+  const agent = scriptedAgent(t, [{ content: "Exact final report" }]);
+  assert.equal(await agent.run(1), "Exact final report");
+});
+
+test("a shared session cannot reset the iteration allowance between fresh conversations", async (t) => {
+  const agent = scriptedAgent(t, [
+    { content: "First report" },
+    {},
+    { content: "Must never be requested" },
+  ]);
+  const session = { iterationsUsed: 0 };
+  const context = { mode: "full" as const, historyBytes: 32768, numCtx: 16384 };
+  await runAgent(
+    agent.client,
+    "First task",
+    undefined,
+    undefined,
+    2,
+    context,
+    session,
+  );
+  await assert.rejects(
+    runAgent(
+      agent.client,
+      "Second task",
+      undefined,
+      undefined,
+      2,
+      context,
+      session,
+    ),
+    /Agent exceeded maximum iterations/,
+  );
+  assert.equal(session.iterationsUsed, 2);
+  assert.equal(agent.requests.length, 2);
+  assert.equal(agent.requests[1].messages.length, 2);
+  assert.equal(agent.requests[1].messages[1].content, "Second task");
+});
 
 for (const [name, response] of [
   ["empty content", { content: "" }],
@@ -314,7 +373,6 @@ for (const verbose of [false, true]) {
     assert.deepEqual(agent.requests[2].messages[4], {
       role: "assistant",
       content: "",
-      thinking: "I will select the city.",
     });
     assert.deepEqual(agent.requests[2].messages[5], {
       role: "user",
@@ -380,3 +438,193 @@ for (const maxIterations of [1, 2]) {
     assert.doesNotMatch(agent.output(), /recovery attempt 2\/2|Final response/);
   });
 }
+
+function contextAgent(
+  t: TestContext,
+  replies: Array<{
+    message: Partial<OllamaMessage>;
+    prompt_eval_count?: number;
+  }>,
+) {
+  const path = logFile(t);
+  t.mock.method(process.stdout, "write", () => true);
+  const requests: Array<{
+    messages: OllamaMessage[];
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
+  const executed: string[] = [];
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    requests.push(JSON.parse(options.body as string));
+    const reply = replies[requests.length - 1];
+    assert.ok(reply, "Unexpected model request");
+    return new Response(
+      JSON.stringify({
+        ...reply,
+        message: { role: "assistant", ...reply.message },
+      }),
+    );
+  });
+  const client = {
+    listTools: async () => ({ tools: capabilities }),
+    callTool: async ({
+      name,
+      arguments: args,
+    }: {
+      name: string;
+      arguments?: Record<string, unknown>;
+    }) => {
+      executed.push(name);
+      if (name === "browser_evaluate")
+        return textResult(`### Result\n${JSON.stringify(native)}`);
+      if (name === "browser_snapshot" && args?.target) return page(compactTree);
+      return full;
+    },
+  };
+  return {
+    path,
+    requests,
+    executed,
+    client,
+    run: (
+      context: ResolvedContextOptions = {
+        mode: "auto",
+        historyBytes: 100000,
+        numCtx: 16384,
+      },
+    ) =>
+      runAgent(
+        client,
+        "Inspect and submit once",
+        undefined,
+        undefined,
+        replies.length,
+        context,
+      ),
+  };
+}
+
+const call = (name: string, args: Record<string, unknown> = {}) => ({
+  function: { name, arguments: args },
+});
+
+test("automatic mode reduces observations, strips thinking, and retrieves exact archived originals", async (t) => {
+  const a = contextAgent(t, [
+    {
+      message: {
+        thinking: "exact diagnostic thinking",
+        tool_calls: [call("browser_navigate")],
+      },
+    },
+    { message: { tool_calls: [call("prowl_browser_history", { turnId: 1 })] } },
+    { message: { tool_calls: [call("prowl_full_snapshot")] } },
+    { message: { content: "Completed" } },
+  ]);
+  await a.run();
+  assert.doesNotMatch(
+    JSON.stringify(a.requests[1].messages),
+    /Useful guide|exact diagnostic thinking/,
+  );
+  assert.match(JSON.stringify(a.requests[1].messages), /Native form metadata/);
+  const retrieved = a.requests[2].messages.at(-1)!;
+  assert.match(retrieved.content, /Useful guide|exact diagnostic thinking/);
+  assert.match(a.requests[3].messages.at(-1)!.content, /Useful guide/);
+  assert.equal(
+    a.executed.filter((name) => name === "browser_evaluate").length,
+    2,
+  );
+  assert.equal(
+    a.executed.some((name) => name.startsWith("prowl_")),
+    false,
+  );
+  const archive = readFileSync(join(dirname(a.path), "history.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(archive.length, 4);
+  assert.match(JSON.stringify(archive[0]), /Useful guide/);
+  assert.match(JSON.stringify(archive[0]), /exact diagnostic thinking/);
+  assert.ok(existsSync(join(dirname(a.path), "snapshot-0001.json")));
+});
+
+test("invalid and unknown local retrieval requests become tool errors without MCP execution", async (t) => {
+  const a = contextAgent(t, [
+    {
+      message: {
+        tool_calls: [
+          call("prowl_browser_history", { turnId: "1" }),
+          call("prowl_browser_history", { turnId: 99 }),
+          call("prowl_browser_history", { checkpoint: 99 }),
+          call("prowl_browser_history", { turnId: 1, checkpoint: 1 }),
+          call("prowl_browser_history", { extra: true }),
+          call("prowl_full_snapshot", { extra: true }),
+        ],
+      },
+    },
+    { message: { content: "Blocked" } },
+  ]);
+  await a.run();
+  assert.equal(a.executed.length, 0);
+  assert.ok(
+    a.requests[1].messages
+      .filter((message) => message.role === "tool")
+      .every((message) => JSON.parse(message.content).isError === true),
+  );
+});
+
+test("full mode retains original observations and thinking with no local tools or archive", async (t) => {
+  const a = contextAgent(t, [
+    {
+      message: {
+        thinking: "full thinking",
+        tool_calls: [call("browser_snapshot")],
+      },
+    },
+    { message: { content: "Completed" } },
+  ]);
+  await a.run({ mode: "full", historyBytes: 1, numCtx: 16384 });
+  assert.match(JSON.stringify(a.requests[1].messages), /full thinking/);
+  assert.match(JSON.stringify(a.requests[1].messages), /Useful guide/);
+  assert.ok(
+    a.requests[0].tools.every(
+      (tool) => !tool.function.name.startsWith("prowl_"),
+    ),
+  );
+  assert.deepEqual(a.executed, ["browser_snapshot"]);
+  assert.equal(existsSync(join(dirname(a.path), "history.jsonl")), false);
+  assert.equal(existsSync(join(dirname(a.path), "snapshot-0001.json")), false);
+});
+
+test("local full snapshot execution failures propagate", async (t) => {
+  const a = contextAgent(t, [
+    { message: { tool_calls: [call("prowl_full_snapshot")] } },
+  ]);
+  const failure = Error("Browser disconnected");
+  t.mock.method(a.client, "callTool", async () => {
+    throw failure;
+  });
+  await assert.rejects(a.run(), (error) => error === failure);
+});
+
+test("provider pressure is consumed once and resolved options override environment settings", async (t) => {
+  const priorMode = process.env.PROWL_CONTEXT_MODE;
+  process.env.PROWL_CONTEXT_MODE = "invalid";
+  t.after(() => {
+    if (priorMode === undefined) delete process.env.PROWL_CONTEXT_MODE;
+    else process.env.PROWL_CONTEXT_MODE = priorMode;
+  });
+  const a = contextAgent(t, [
+    ...Array.from({ length: 3 }, () => ({
+      message: { tool_calls: [call("browser_click")] },
+    })),
+    {
+      prompt_eval_count: 800,
+      message: { tool_calls: [call("browser_click")] },
+    },
+    { message: { tool_calls: [call("browser_click")] } },
+    { message: { content: "Completed" } },
+  ]);
+  await a.run({ mode: "auto", historyBytes: 1000000, numCtx: 1000 });
+  const checkpoint = a.requests[4].messages[3];
+  assert.equal(checkpoint.tool_name, "prowl_browser_history");
+  assert.deepEqual(a.requests[5].messages[3], checkpoint);
+});

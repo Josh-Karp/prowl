@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { Command } from "commander";
-import { runAction } from "./actions/runAction.js";
-import { reportError } from "./logger.js";
+import { runAction } from "#actions/runAction.js";
+import { reportError } from "#logger.js";
 
 const program = new Command();
 
@@ -19,12 +19,20 @@ program
   )
   .option(
     "--max-iterations <count>",
-    "Agent iteration limit (defaults to MAX_ITERATIONS or 30)",
+    "Total agent iteration limit across all runs (defaults to MAX_ITERATIONS or 30)",
+  )
+  .option(
+    "--context-mode <mode>",
+    "Browser context handling: auto or full (defaults to PROWL_CONTEXT_MODE or auto)",
+  )
+  .option(
+    "--history-bytes <count>",
+    "Automatic history byte budget (defaults to PROWL_HISTORY_BYTES or 2 × OLLAMA_NUM_CTX)",
   )
   .option("--verbose", "Print detailed logs to the console")
   .option(
     "--log-file <path>",
-    "Log base filename; a unique run suffix is added (defaults to LOG_FILE or logs/prowl.log)",
+    "Log base filename; each run uses a unique folder (defaults to LOG_FILE or logs/prowl.log)",
   );
 
 program
@@ -35,7 +43,11 @@ program
     "Full form URL, including any query parameters",
     "http://localhost:5173",
   )
-  .option("--runs <count>", "Number of varied submissions", "1")
+  .option(
+    "--runs <count>",
+    "Number of sequential registrations, stopping on a blocker or uncertainty",
+    "1",
+  )
   .option("--instructions <text>", "Additional form instructions")
   .action((url: string, _options, command: Command) =>
     runAction({ ...command.optsWithGlobals(), url }),

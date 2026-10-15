@@ -1,3 +1,5 @@
+import type { TestContext } from "node:test";
+
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -10,7 +12,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
-import test, { type TestContext } from "node:test";
+import test from "node:test";
 
 function temporaryDirectory(t: TestContext) {
   const directory = mkdtempSync(join(tmpdir(), "prowl-cli-"));
@@ -19,20 +21,22 @@ function temporaryDirectory(t: TestContext) {
 }
 
 function run(entry: string, args: string[], logFile: string) {
-  return spawnSync(process.execPath, ["--import", "tsx", entry, ...args], {
-    encoding: "utf8",
-    timeout: 10_000,
-    env: { ...process.env, LOG_FILE: logFile, MAX_ITERATIONS: "0" },
-  });
+  return spawnSync(
+    process.execPath,
+    ["--conditions=development", "--import", "tsx", entry, ...args],
+    {
+      encoding: "utf8",
+      timeout: 10_000,
+      env: { ...process.env, LOG_FILE: logFile, MAX_ITERATIONS: "0" },
+    },
+  );
 }
 
 function logs(basePath: string) {
   const { name, ext } = parse(basePath);
   return readdirSync(dirname(basePath))
-    .filter(
-      (file) => file.startsWith(`${name}-`) && file.endsWith(ext || ".log"),
-    )
-    .map((file) => join(dirname(basePath), file));
+    .filter((file) => file.startsWith(`${name}-`))
+    .map((file) => join(dirname(basePath), file, name + (ext || ".log")));
 }
 
 function singleLog(basePath: string) {
@@ -74,7 +78,7 @@ test("CLI logs a failure once, quietly, with CLI path overriding LOG_FILE", (t) 
   assert.equal(logs(environmentPath).length, 0);
   const record = JSON.parse(readFileSync(singleLog(filePath), "utf8").trim());
   assert.equal(record.level, "error");
-  assert.match(record.data.stack, /_validateOptions/);
+  assert.match(record.data.stack, /resolveRunActionOptions/);
 });
 
 test("verbose CLI errors include details while dev uses the environment path", (t) => {
@@ -86,7 +90,7 @@ test("verbose CLI errors include details while dev uses the environment path", (
     filePath,
   );
   assert.equal(verbose.status, 1);
-  assert.match(verbose.stderr, /_validateOptions/);
+  assert.match(verbose.stderr, /resolveRunActionOptions/);
   assert.match(readFileSync(singleLog(filePath), "utf8"), /maxIterations/);
   const devPath = join(directory, "dev.log");
   const dev = run("src/index.ts", [], devPath);
@@ -95,7 +99,10 @@ test("verbose CLI errors include details while dev uses the environment path", (
     dev.stderr,
     "[error] maxIterations must be a positive integer.\n",
   );
-  assert.match(readFileSync(singleLog(devPath), "utf8"), /_validateOptions/);
+  assert.match(
+    readFileSync(singleLog(devPath), "utf8"),
+    /resolveRunActionOptions/,
+  );
 });
 
 test("help exposes logging flags without creating a log", (t) => {
@@ -146,7 +153,13 @@ test("gitignore covers default and custom logs", (t) => {
   assert.equal(init.status, 0, init.stderr);
   const result = spawnSync(
     "git",
-    ["check-ignore", "logs/prowl.log", "nested/custom.log", "src/logger.ts"],
+    [
+      "check-ignore",
+      "logs/prowl.log",
+      "nested/custom.log",
+      "nested/custom-2026-10-12T08-00-00-000Z-example/history.jsonl",
+      "src/logger.ts",
+    ],
     {
       cwd: directory,
       encoding: "utf8",
@@ -156,5 +169,49 @@ test("gitignore covers default and custom logs", (t) => {
   assert.deepEqual(result.stdout.trim().split("\n"), [
     "logs/prowl.log",
     "nested/custom.log",
+    "nested/custom-2026-10-12T08-00-00-000Z-example/history.jsonl",
   ]);
+});
+
+test("context CLI flags override environment values and validation happens before browser connection", (t) => {
+  const directory = temporaryDirectory(t);
+  const entry = join(process.cwd(), "src/cli.ts");
+  const invoke = (args: string[], overrides: NodeJS.ProcessEnv) =>
+    spawnSync(
+      process.execPath,
+      [
+        "--conditions=development",
+        "--import",
+        import.meta.resolve("tsx"),
+        entry,
+        "run",
+        "https://example.com/form?runId=exact",
+        "--max-iterations",
+        "1",
+        ...args,
+      ],
+      {
+        cwd: directory,
+        encoding: "utf8",
+        timeout: 10000,
+        env: {
+          ...process.env,
+          LOG_FILE: join(directory, "context.log"),
+          ...overrides,
+        },
+      },
+    );
+  const mode = invoke(["--context-mode", "broken"], {
+    PROWL_CONTEXT_MODE: "full",
+  });
+  assert.equal(mode.status, 1);
+  assert.match(mode.stderr, /context-mode must be auto or full/);
+  assert.equal(mode.stdout, "");
+  const bytes = invoke(["--context-mode", "full", "--history-bytes", "0"], {
+    PROWL_CONTEXT_MODE: "broken",
+    PROWL_HISTORY_BYTES: "1000",
+  });
+  assert.equal(bytes.status, 1);
+  assert.match(bytes.stderr, /history-bytes must be a positive integer/);
+  assert.equal(bytes.stdout, "");
 });
