@@ -61,6 +61,8 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@commitlint/cli": "21.2.3",
+    "@commitlint/config-conventional": "21.2.3",
     "@eslint/js": "10.0.1",
     "@types/node": "latest",
     "eslint": "10.12.0",
