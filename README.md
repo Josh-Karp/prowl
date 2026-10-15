@@ -16,12 +16,12 @@ Installed users do not need pnpm, TypeScript, or tsx. Contributors also need pnp
 Prowl is distributed as a local package tarball. Build one using the [packaging steps](#packaging), or install a supplied tarball:
 
 ```bash
-npm install --global /path/to/prowl-0.1.1.tgz
+npm install --global /path/to/prowl-0.2.0.tgz
 prowl --help
 prowl run --help
 ```
 
-The filename follows the version in `package.json`; `prowl-0.1.1.tgz` is the current example. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
+The filename follows the version in `package.json`; `prowl-0.2.0.tgz` is the current example. Registry publishing remains disabled through `private: true`, so `npm install --global prowl` is not this project's installation method.
 
 Run Prowl from your project directory. It loads `.env` from that directory, not from the installed package. For example:
 
@@ -199,8 +199,8 @@ After installing the development dependencies:
 
 ```bash
 npm pack --dry-run         # Inspect the package contents; lifecycle scripts may rebuild dist
-npm pack                   # Creates prowl-0.1.1.tgz
-npm install --global ./prowl-0.1.1.tgz
+npm pack                   # Creates prowl-0.2.0.tgz
+npm install --global ./prowl-0.2.0.tgz
 prowl --help
 ```
 
