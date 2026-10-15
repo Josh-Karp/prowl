@@ -526,7 +526,22 @@ test("automatic mode reduces observations, strips thinking, and retrieves exact 
   );
   assert.match(JSON.stringify(a.requests[1].messages), /Native form metadata/);
   const retrieved = a.requests[2].messages.at(-1)!;
-  assert.match(retrieved.content, /Useful guide|exact diagnostic thinking/);
+  assert.deepEqual(
+    JSON.parse(JSON.parse(retrieved.content).content[0].text).messages,
+    [
+      {
+        role: "assistant",
+        content: "",
+        thinking: "exact diagnostic thinking",
+        tool_calls: [call("browser_navigate")],
+      },
+      {
+        role: "tool",
+        tool_name: "browser_navigate",
+        content: JSON.stringify(full),
+      },
+    ],
+  );
   assert.match(a.requests[3].messages.at(-1)!.content, /Useful guide/);
   assert.equal(
     a.executed.filter((name) => name === "browser_evaluate").length,
@@ -545,6 +560,65 @@ test("automatic mode reduces observations, strips thinking, and retrieves exact 
   assert.match(JSON.stringify(archive[0]), /exact diagnostic thinking/);
   assert.ok(existsSync(join(dirname(a.path), "snapshot-0001.json")));
 });
+
+test("automatic history retrieves an empty response with its recovery prompt and thinking", async (t) => {
+  const a = contextAgent(t, [
+    { message: { content: "", thinking: "Recovery thinking" } },
+    { message: { tool_calls: [call("prowl_browser_history", { turnId: 1 })] } },
+    { message: { content: "Completed" } },
+  ]);
+  await a.run();
+  assert.deepEqual(a.requests[1].messages.slice(2), [
+    { role: "assistant", content: "" },
+    { role: "user", content: recoveryMessage },
+  ]);
+  const retrieved = JSON.parse(a.requests[2].messages.at(-1)!.content);
+  assert.deepEqual(JSON.parse(retrieved.content[0].text).messages, [
+    { role: "assistant", content: "", thinking: "Recovery thinking" },
+    { role: "user", content: recoveryMessage },
+  ]);
+});
+
+for (const mode of ["auto", "full"] as const) {
+  test(`${mode} mode executes tools sequentially and keeps each receipt once in order`, async (t) => {
+    const a = contextAgent(t, [
+      {
+        message: { tool_calls: [call("browser_click"), call("browser_type")] },
+      },
+      { message: { content: "Completed" } },
+    ]);
+    let active = false;
+    t.mock.method(a.client, "callTool", async ({ name }) => {
+      assert.equal(
+        active,
+        false,
+        "Tools must finish before the next tool starts",
+      );
+      active = true;
+      await Promise.resolve();
+      active = false;
+      return textResult(`${name} completed`);
+    });
+    await a.run({ mode, historyBytes: 100000, numCtx: 16384 });
+    assert.deepEqual(a.requests[1].messages.slice(2), [
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [call("browser_click"), call("browser_type")],
+      },
+      {
+        role: "tool",
+        tool_name: "browser_click",
+        content: JSON.stringify(textResult("browser_click completed")),
+      },
+      {
+        role: "tool",
+        tool_name: "browser_type",
+        content: JSON.stringify(textResult("browser_type completed")),
+      },
+    ]);
+  });
+}
 
 test("invalid and unknown local retrieval requests become tool errors without MCP execution", async (t) => {
   const a = contextAgent(t, [
@@ -579,9 +653,25 @@ test("full mode retains original observations and thinking with no local tools o
         tool_calls: [call("browser_snapshot")],
       },
     },
+    { message: { content: "", thinking: "full recovery thinking" } },
     { message: { content: "Completed" } },
   ]);
   await a.run({ mode: "full", historyBytes: 1, numCtx: 16384 });
+  assert.deepEqual(a.requests[2].messages.slice(2), [
+    {
+      role: "assistant",
+      content: "",
+      thinking: "full thinking",
+      tool_calls: [call("browser_snapshot")],
+    },
+    {
+      role: "tool",
+      tool_name: "browser_snapshot",
+      content: JSON.stringify(full),
+    },
+    { role: "assistant", content: "", thinking: "full recovery thinking" },
+    { role: "user", content: recoveryMessage },
+  ]);
   assert.match(JSON.stringify(a.requests[1].messages), /full thinking/);
   assert.match(JSON.stringify(a.requests[1].messages), /Useful guide/);
   assert.ok(
