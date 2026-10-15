@@ -18,6 +18,12 @@ interface FormRunOptions {
   baseUrl?: string;
 }
 
+interface FormRunSummary {
+  requestedRuns: number;
+  iterationsUsed: number;
+  results: FormRunResult[];
+}
+
 const reportSchema = z
   .object({
     status: z.enum(["confirmed", "blocked", "uncertain"]),
@@ -42,39 +48,48 @@ function parseReport(content: string, runIndex: number): FormRunResult {
   };
 }
 
-export async function runForms(client: AgentClient, options: FormRunOptions) {
-  const { url, runs, maxIterations, context, instructions, model, baseUrl } =
-    options;
-  for (const [name, value] of Object.entries({ runs, maxIterations })) {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-      throw new Error(`${name} must be a positive integer.`);
-    }
-  }
+function logRunResult(result: FormRunResult, requestedRuns: number) {
+  logger.debug("Form run finished", { data: result });
+
+  const report = [
+    `Run ${result.runIndex}/${requestedRuns}: ${result.status}`,
+    result.summary,
+  ];
+
+  if (result.evidence) report.push(`Evidence: ${result.evidence}`);
+  if (result.reference) report.push(`Reference: ${result.reference}`);
+
+  logger.info(report.join("\n"), { console: true });
+}
+
+function logRunSummary(summary: FormRunSummary, maxIterations: number) {
+  logger.debug("Form runs summary", { data: summary });
+
+  const confirmed = summary.results.filter(
+    (result) => result.status === "confirmed",
+  ).length;
+
+  logger.info(
+    `Form runs: ${confirmed}/${summary.requestedRuns} confirmed; ${summary.iterationsUsed}/${maxIterations} iterations used.`,
+    { console: true },
+  );
+}
+
+export async function runBatch(client: AgentClient, options: FormRunOptions) {
+  const { runs, maxIterations } = options;
   const session: AgentSession = { iterationsUsed: 0 };
-  const summary = {
+  const summary: FormRunSummary = {
     requestedRuns: runs,
     iterationsUsed: 0,
-    results: [] as FormRunResult[],
-  };
-  let activeRun: number | undefined;
-  const finish = (result: FormRunResult) => {
-    summary.results.push(result);
-    logger.debug("Form run finished", { data: result });
-    const report = [
-      `Run ${result.runIndex}/${runs}: ${result.status}`,
-      result.summary,
-    ];
-    if (result.evidence) report.push(`Evidence: ${result.evidence}`);
-    if (result.reference) report.push(`Reference: ${result.reference}`);
-    logger.info(report.join("\n"), { console: true });
+    results: [],
   };
 
-  try {
-    for (let runIndex = 1; runIndex <= runs; runIndex++) {
-      if (session.iterationsUsed >= maxIterations) {
-        throw new Error("Agent exceeded maximum iterations.");
-      }
-      activeRun = session.runIndex = runIndex;
+  async function runForm(runIndex: number) {
+    const { url, instructions, model, baseUrl, context } = options;
+    session.runIndex = runIndex;
+    let result: FormRunResult | undefined;
+
+    try {
       logger.debug("Form run started", {
         data: {
           runIndex,
@@ -86,6 +101,7 @@ export async function runForms(client: AgentClient, options: FormRunOptions) {
         `Run ${runIndex}/${runs}: starting with a fresh conversation...`,
         { console: true },
       );
+
       const report = await runAgent(
         client,
         formTask(url, runs, instructions, runIndex),
@@ -95,34 +111,39 @@ export async function runForms(client: AgentClient, options: FormRunOptions) {
         context,
         session,
       );
-      const result = parseReport(report, runIndex);
-      activeRun = undefined;
-      finish(result);
+      result = parseReport(report, runIndex);
+      return result;
+    } catch (error) {
+      result = {
+        runIndex,
+        status: "uncertain",
+        summary: error instanceof Error ? error.message : String(error),
+      };
+      throw error;
+    } finally {
+      if (result) {
+        summary.results.push(result);
+        logRunResult(result, runs);
+      }
+    }
+  }
+
+  try {
+    for (let runIndex = 1; runIndex <= runs; runIndex++) {
+      if (session.iterationsUsed >= maxIterations) {
+        throw new Error("Agent exceeded maximum iterations.");
+      }
+
+      const result = await runForm(runIndex);
       if (result.status !== "confirmed") {
         throw new Error(
           `Run ${runIndex}/${runs} ${result.status}: ${result.summary}`,
         );
       }
     }
-  } catch (error) {
-    if (activeRun !== undefined) {
-      finish({
-        runIndex: activeRun,
-        status: "uncertain",
-        summary: error instanceof Error ? error.message : String(error),
-      });
-    }
-    throw error;
   } finally {
     summary.iterationsUsed = session.iterationsUsed;
-    logger.debug("Form runs summary", { data: summary });
-    const confirmed = summary.results.filter(
-      (result) => result.status === "confirmed",
-    ).length;
-    logger.info(
-      `Form runs: ${confirmed}/${runs} confirmed; ${summary.iterationsUsed}/${maxIterations} iterations used.`,
-      { console: true },
-    );
+    logRunSummary(summary, maxIterations);
   }
   return summary;
 }

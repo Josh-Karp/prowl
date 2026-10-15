@@ -17,7 +17,7 @@ export interface ResolvedRunActionOptions {
   maxIterations: number;
 }
 
-export function resolveRunActionOptions(
+export function resolveRunOptions(
   options: RunActionOptions = {},
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedRunActionOptions {

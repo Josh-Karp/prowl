@@ -78,7 +78,7 @@ test("CLI logs a failure once, quietly, with CLI path overriding LOG_FILE", (t) 
   assert.equal(logs(environmentPath).length, 0);
   const record = JSON.parse(readFileSync(singleLog(filePath), "utf8").trim());
   assert.equal(record.level, "error");
-  assert.match(record.data.stack, /resolveRunActionOptions/);
+  assert.match(record.data.stack, /resolveRunOptions/);
 });
 
 test("verbose CLI errors include details while dev uses the environment path", (t) => {
@@ -90,7 +90,7 @@ test("verbose CLI errors include details while dev uses the environment path", (
     filePath,
   );
   assert.equal(verbose.status, 1);
-  assert.match(verbose.stderr, /resolveRunActionOptions/);
+  assert.match(verbose.stderr, /resolveRunOptions/);
   assert.match(readFileSync(singleLog(filePath), "utf8"), /maxIterations/);
   const devPath = join(directory, "dev.log");
   const dev = run("src/index.ts", [], devPath);
@@ -99,10 +99,7 @@ test("verbose CLI errors include details while dev uses the environment path", (
     dev.stderr,
     "[error] maxIterations must be a positive integer.\n",
   );
-  assert.match(
-    readFileSync(singleLog(devPath), "utf8"),
-    /resolveRunActionOptions/,
-  );
+  assert.match(readFileSync(singleLog(devPath), "utf8"), /resolveRunOptions/);
 });
 
 test("help exposes logging flags without creating a log", (t) => {

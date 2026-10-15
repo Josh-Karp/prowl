@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { runForms } from "#forms/runs.js";
+import { runBatch } from "#forms/runs.js";
 import { configureLogger, logger } from "#logger.js";
 
 const toolCall = (name = "browser_snapshot") => ({
@@ -86,7 +86,7 @@ function fixture(t: TestContext, replies: Partial<OllamaMessage>[]) {
         .split("\n")
         .map((line) => JSON.parse(line)),
     run: (runs = 3, maxIterations = 30, mode: "auto" | "full" = "auto") =>
-      runForms(client, {
+      runBatch(client, {
         url: "http://fixture/?runId=exact&step=1",
         runs,
         maxIterations,

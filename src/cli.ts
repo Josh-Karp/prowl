@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import "dotenv/config";
 import { Command } from "commander";
-import { runAction } from "#actions/runAction.js";
+import { run } from "#actions/runAction.js";
 import { reportError } from "#logger.js";
 
 const program = new Command();
@@ -50,7 +50,7 @@ program
   )
   .option("--instructions <text>", "Additional form instructions")
   .action((url: string, _options, command: Command) =>
-    runAction({ ...command.optsWithGlobals(), url }),
+    run({ ...command.optsWithGlobals(), url }),
   );
 
 await program.parseAsync().catch((error) => {
