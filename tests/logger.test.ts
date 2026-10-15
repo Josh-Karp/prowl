@@ -1,24 +1,23 @@
-import type { TestContext } from "node:test";
-
 import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import { Logger, configureLogger, logger, reportError } from "#logger.js";
 import { ContextArtifacts } from "#agent/context/artifacts.js";
+import {
+  temporaryDirectory,
+  readJsonLines,
+  captureOutput,
+} from "#tests/helpers.js";
 
 test("each run keeps its log, history and snapshots together in one folder", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-run-folder-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-run-folder-");
   const paths: string[] = [];
   for (const value of ["first", "second"]) {
     const log = new Logger({ filePath: join(directory, "custom.log") });
@@ -48,42 +47,17 @@ test("each run keeps its log, history and snapshots together in one folder", (t)
   assert.doesNotMatch(readFileSync(paths[0], "utf8"), /second/);
 });
 
-function capture(t: TestContext) {
-  let stdout = "",
-    stderr = "";
-  t.mock.method(process.stdout, "write", (chunk: unknown) => {
-    stdout += String(chunk);
-    return true;
-  });
-  t.mock.method(process.stderr, "write", (chunk: unknown) => {
-    stderr += String(chunk);
-    return true;
-  });
-  return {
-    get stdout() {
-      return stdout;
-    },
-    get stderr() {
-      return stderr;
-    },
-  };
-}
-
 test("quiet logging persists every level and only explicitly shows concise progress", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-logger-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-logger-");
   const filePath = join(directory, "nested", "agent.log");
-  const output = capture(t);
+  const output = captureOutput(t);
   const log = new Logger({ filePath });
   assert.equal(existsSync(filePath), false);
   log.debug("Details", { data: { response: "private-payload" } });
   log.info("Waiting for model", { console: true, data: "hidden-detail" });
   log.warn("Warning");
   log.error("Failed", { console: true, data: new Error("hidden-stack") });
-  const records = readFileSync(log.filePath, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+  const records = readJsonLines(log.filePath);
   assert.deepEqual(
     records.map((record) => record.level),
     ["debug", "info", "warn", "error"],
@@ -100,9 +74,8 @@ test("quiet logging persists every level and only explicitly shows concise progr
 });
 
 test("console-only entries never create or append to a log file", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-console-only-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const output = capture(t);
+  const directory = temporaryDirectory(t, "prowl-console-only-");
+  const output = captureOutput(t);
   const log = new Logger({ filePath: join(directory, "nested", "agent.log") });
   log.info("Console only", { console: true, persist: false });
   assert.equal(output.stdout, "[info] Console only\n");
@@ -115,11 +88,10 @@ test("console-only entries never create or append to a log file", (t) => {
 });
 
 test("console-only logging works even after a file write failure", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-console-error-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-console-error-");
   const blocked = join(directory, "file");
   writeFileSync(blocked, "not a directory");
-  const output = capture(t);
+  const output = captureOutput(t);
   const log = new Logger({
     filePath: join(blocked, "agent.log"),
     verbose: true,
@@ -134,11 +106,10 @@ test("console-only logging works even after a file write failure", (t) => {
 });
 
 test("each logger run gets a separate file and preserves previous logs", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-verbose-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-verbose-");
   const filePath = join(directory, "agent.log");
   writeFileSync(filePath, "Legacy log\n");
-  const output = capture(t);
+  const output = captureOutput(t);
   const earlier = new Logger({ filePath });
   earlier.info("Earlier entry");
   const log = new Logger({ filePath, verbose: true });
@@ -158,8 +129,7 @@ test("each logger run gets a separate file and preserves previous logs", (t) => 
 });
 
 test("records safely serialize multiline strings, circular data, bigint and errors", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-serialize-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-serialize-");
   const filePath = join(directory, "agent.log");
   const data: Record<string, unknown> = {
     text: "one\ntwo",
@@ -179,10 +149,9 @@ test("records safely serialize multiline strings, circular data, bigint and erro
 });
 
 test("configuration uses LOG_FILE while an explicit path takes precedence", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-config-"));
+  const directory = temporaryDirectory(t, "prowl-config-");
   const original = process.env.LOG_FILE;
   t.after(() => {
-    rmSync(directory, { recursive: true, force: true });
     if (original === undefined) delete process.env.LOG_FILE;
     else process.env.LOG_FILE = original;
     configureLogger();
@@ -201,8 +170,7 @@ test("configuration uses LOG_FILE while an explicit path takes precedence", (t) 
 });
 
 test("reconfiguring starts a new run and never appends to the preceding run", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-new-run-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-new-run-");
   const options = { filePath: join(directory, "agent") };
   const log = new Logger(options);
   const firstPath = log.filePath;
@@ -219,9 +187,8 @@ test("reconfiguring starts a new run and never appends to the preceding run", (t
 });
 
 test("an existing generated filename is never overwritten or appended to", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-log-collision-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  capture(t);
+  const directory = temporaryDirectory(t, "prowl-log-collision-");
+  captureOutput(t);
   const log = new Logger({ filePath: join(directory, "agent.log") });
   mkdirSync(dirname(log.filePath), { recursive: true });
   writeFileSync(log.filePath, "Existing run\n");
@@ -230,14 +197,11 @@ test("an existing generated filename is never overwritten or appended to", (t) =
 });
 
 test("an unwritable destination fails visibly once without recursive reporting", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-log-error-"));
-  t.after(() => {
-    rmSync(directory, { recursive: true, force: true });
-    configureLogger();
-  });
+  const directory = temporaryDirectory(t, "prowl-log-error-");
+  t.after(() => configureLogger());
   const blocked = join(directory, "file");
   writeFileSync(blocked, "not a directory");
-  const output = capture(t);
+  const output = captureOutput(t);
   configureLogger({ filePath: join(blocked, "agent.log") });
   let failure: unknown;
   try {
@@ -252,8 +216,7 @@ test("an unwritable destination fails visibly once without recursive reporting",
 });
 
 test("context artifacts create files lazily, append history and number snapshots", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-artifact-writes-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-artifact-writes-");
   const runDirectory = join(directory, "run");
   const artifacts = new ContextArtifacts(join(runDirectory, "custom.log"));
   assert.equal(artifacts.directory, runDirectory);
@@ -267,16 +230,10 @@ test("context artifacts create files lazily, append history and number snapshots
     "snapshot-0001.json",
     "snapshot-0002.json",
   ]);
-  assert.deepEqual(
-    readFileSync(join(runDirectory, "history.jsonl"), "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line)),
-    [
-      { turn: 1, content: "first\nreceipt" },
-      { turn: 2, content: "second receipt" },
-    ],
-  );
+  assert.deepEqual(readJsonLines(join(runDirectory, "history.jsonl")), [
+    { turn: 1, content: "first\nreceipt" },
+    { turn: 2, content: "second receipt" },
+  ]);
   for (const [filename, expected] of [
     ["snapshot-0001.json", { ref: "e1" }],
     ["snapshot-0002.json", { ref: "e2" }],
@@ -289,8 +246,7 @@ test("context artifacts create files lazily, append history and number snapshots
 });
 
 test("context artifacts preserve existing history and snapshots on collisions", (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-artifact-collisions-"));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const directory = temporaryDirectory(t, "prowl-artifact-collisions-");
   const logPath = join(directory, "custom.log");
   const first = new ContextArtifacts(logPath);
   first.history({ content: "original history" });

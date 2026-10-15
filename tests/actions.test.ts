@@ -1,18 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { run } from "#actions/runAction.js";
-import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { configureLogger } from "#logger.js";
+import { temporaryDirectory } from "#tests/helpers.js";
 
 test("invalid form options are rejected before connecting Playwright", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-actions-"));
+  const directory = temporaryDirectory(t, "prowl-actions-");
   const logFile = join(directory, "agent.log");
-  t.after(() => {
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
+  t.after(() => configureLogger());
   await assert.rejects(
     run({ url: "file:///tmp/form.html", logFile }),
     /HTTP or HTTPS/,
@@ -28,11 +24,8 @@ test("invalid form options are rejected before connecting Playwright", async (t)
 });
 
 test("invalid context settings are rejected before connecting Playwright", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-context-options-"));
-  t.after(() => {
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
+  const directory = temporaryDirectory(t, "prowl-context-options-");
+  t.after(() => configureLogger());
   const logFile = join(directory, "agent.log");
   await assert.rejects(
     run({ contextMode: "invalid", logFile }),

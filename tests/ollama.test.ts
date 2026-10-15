@@ -8,30 +8,29 @@ import type {
 import assert from "node:assert/strict";
 import test from "node:test";
 import { chat } from "#models/ollama.js";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { configureLogger, logger, reportError } from "#logger.js";
+import {
+  temporaryDirectory,
+  readJsonLines,
+  captureOutput,
+} from "#tests/helpers.js";
 
 test("HTTP failure details stay in the file while the console reports only the status", async (t) => {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-http-error-"));
+  const directory = temporaryDirectory(t, "prowl-http-error-");
   const filePath = join(directory, "agent.log");
   configureLogger({ filePath });
-  const originalFetch = globalThis.fetch;
-  t.after(() => {
-    globalThis.fetch = originalFetch;
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
-  let stderr = "";
-  t.mock.method(process.stderr, "write", (chunk: unknown) => {
-    stderr += String(chunk);
-    return true;
-  });
+  t.after(() => configureLogger());
+  const output = captureOutput(t);
   const body = "Detailed backend diagnostic\n" + "payload".repeat(100);
-  globalThis.fetch = async () => new Response(body, { status: 500 });
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async () => new Response(body, { status: 500 }),
+  );
   await chat([]).catch(reportError);
-  assert.equal(stderr, "[error] Ollama request failed: 500\n");
+  assert.equal(output.stderr, "[error] Ollama request failed: 500\n");
   const record = JSON.parse(readFileSync(logger.filePath, "utf8").trim());
   assert.equal(record.data.cause, body);
   assert.notEqual(record.message, "Ollama completion metadata");
@@ -39,15 +38,14 @@ test("HTTP failure details stay in the file while the console reports only the s
 
 test("requests enough context for browser tasks and supports OLLAMA_NUM_CTX", async (t) => {
   isolatedLog(t);
-  const originalFetch = globalThis.fetch;
   const originalContext = process.env.OLLAMA_NUM_CTX;
   let request: { options?: { num_ctx?: number } };
-  globalThis.fetch = async (_url, options) => {
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
     request = JSON.parse(options!.body as string);
     return new Response(
       JSON.stringify({ message: { role: "assistant", content: "Done" } }),
     );
-  };
+  });
   try {
     delete process.env.OLLAMA_NUM_CTX;
     await chat([]);
@@ -63,7 +61,6 @@ test("requests enough context for browser tasks and supports OLLAMA_NUM_CTX", as
       );
     }
   } finally {
-    globalThis.fetch = originalFetch;
     if (originalContext === undefined) delete process.env.OLLAMA_NUM_CTX;
     else process.env.OLLAMA_NUM_CTX = originalContext;
   }
@@ -71,48 +68,48 @@ test("requests enough context for browser tasks and supports OLLAMA_NUM_CTX", as
 
 test("a stalled model request is aborted by the configured deadline", async (t) => {
   const path = isolatedLog(t);
-  const originalFetch = globalThis.fetch;
   const originalTimeout = process.env.OLLAMA_TIMEOUT_MS;
   process.env.OLLAMA_TIMEOUT_MS = "10";
-  globalThis.fetch = async (_url, options) =>
-    new Promise((resolve, reject) => {
-      const timer = setTimeout(
-        () =>
-          resolve(
-            new Response(
-              JSON.stringify({
-                message: { role: "assistant", content: "late" },
-              }),
+  t.mock.method(
+    globalThis,
+    "fetch",
+    async (_url, options) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(
+          () =>
+            resolve(
+              new Response(
+                JSON.stringify({
+                  message: { role: "assistant", content: "late" },
+                }),
+              ),
             ),
-          ),
-        100,
-      );
-      const onAbort = () => {
-        clearTimeout(timer);
-        reject(options?.signal?.reason);
-      };
-      if (options?.signal?.aborted) onAbort();
-      else options?.signal?.addEventListener("abort", onAbort, { once: true });
-    });
+          100,
+        );
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(options?.signal?.reason);
+        };
+        if (options?.signal?.aborted) onAbort();
+        else
+          options?.signal?.addEventListener("abort", onAbort, { once: true });
+      }),
+  );
   try {
     await assert.rejects(chat([]), /timed out|timeout/i);
     assert.equal(existsSync(path), false);
     process.env.OLLAMA_TIMEOUT_MS = "0";
     await assert.rejects(chat([]), /OLLAMA_TIMEOUT_MS/);
   } finally {
-    globalThis.fetch = originalFetch;
     if (originalTimeout === undefined) delete process.env.OLLAMA_TIMEOUT_MS;
     else process.env.OLLAMA_TIMEOUT_MS = originalTimeout;
   }
 });
 
 function isolatedLog(t: TestContext): string {
-  const directory = mkdtempSync(join(tmpdir(), "prowl-ollama-metadata-"));
+  const directory = temporaryDirectory(t, "prowl-ollama-metadata-");
   configureLogger({ filePath: join(directory, "agent.log") });
-  t.after(() => {
-    configureLogger();
-    rmSync(directory, { recursive: true, force: true });
-  });
+  t.after(() => configureLogger());
   return logger.filePath;
 }
 
@@ -164,13 +161,7 @@ const metadataCases = [
 for (const { name, message, metadata } of metadataCases) {
   test(name, async (t) => {
     const path = isolatedLog(t);
-    let output = "";
-    for (const stream of [process.stdout, process.stderr]) {
-      t.mock.method(stream, "write", (chunk: unknown) => {
-        if (typeof chunk === "string") output += chunk;
-        return true;
-      });
-    }
+    const output = captureOutput(t);
     t.mock.method(
       globalThis,
       "fetch",
@@ -186,15 +177,13 @@ for (const { name, message, metadata } of metadataCases) {
     );
 
     assert.deepEqual(await chat([]), message);
-    assert.equal(output, "");
+    assert.equal(output.stdout, "");
+    assert.equal(output.stderr, "");
     assert.ok(
       existsSync(path),
       "successful responses must write completion metadata",
     );
-    const records = readFileSync(path, "utf8")
-      .trim()
-      .split("\n")
-      .map((line) => JSON.parse(line));
+    const records = readJsonLines(path);
     const completionRecords = records.filter(
       (record) => record.message === "Ollama completion metadata",
     );
@@ -265,10 +254,7 @@ test("reports provider usage and UTF-8 request sizes without changing the assist
     ...usage,
   });
   assert.ok(metrics[0].messagesBytes > JSON.stringify(messages).length);
-  const records = readFileSync(path, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+  const records = readJsonLines(path);
   assert.deepEqual(
     records.find((record) => record.message === "Context event")?.data,
     { schemaVersion: 1, ...metrics[0] },
