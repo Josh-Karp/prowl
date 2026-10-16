@@ -30,11 +30,9 @@ function validateTurn(messages: OllamaMessage[]): void {
   const assistant = messages[0];
   const calls = assistant?.tool_calls ?? [];
   const pairedLength = calls.length + 1;
+  // A no-tool turn may be followed by a recovery prompt when it was empty or its report was rejected.
   const recovery =
-    calls.length === 0 &&
-    !(assistant?.content ?? "").trim() &&
-    messages.length === 2 &&
-    messages[1].role === "user";
+    calls.length === 0 && messages.length === 2 && messages[1].role === "user";
 
   if (
     assistant?.role !== "assistant" ||

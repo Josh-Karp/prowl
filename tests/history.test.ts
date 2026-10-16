@@ -240,20 +240,16 @@ test("empty-response recovery stays with its owning turn and raw originals remai
   );
 });
 
-test("validates original turn pairing and permits recovery only for empty no-tool turns", () => {
+test("validates original turn pairing and permits recovery only for no-tool turns", () => {
   const h = new ConversationHistory(prefix, { budget: 8000, numCtx: 1000 });
   assert.throws(
     () => h.appendTurn(turn(1), turn(1).slice(0, 2)),
     /complete|pair/,
   );
-  assert.throws(
-    () =>
-      h.appendTurn([
-        { role: "assistant", content: "Finished" },
-        { role: "user", content: "Recover" },
-      ]),
-    /complete|pair/,
-  );
+  h.appendTurn([
+    { role: "assistant", content: "Rejected report" },
+    { role: "user", content: "Recover" },
+  ]);
   assert.throws(
     () => h.appendTurn([...turn(1), { role: "user", content: "Recover" }]),
     /complete|pair/,
