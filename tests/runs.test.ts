@@ -6,12 +6,32 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { runBatch } from "#forms/runs.js";
+import { formTask } from "#forms/prompts.js";
 import { configureLogger, logger } from "#logger.js";
 import {
   temporaryDirectory,
   readJsonLines,
   captureOutput,
 } from "#tests/helpers.js";
+
+test("form task requests a JSON report without directing an immediate report-tool call", () => {
+  const task = formTask(
+    "http://fixture/?runId=exact&step=1",
+    3,
+    "Choose Business.",
+    2,
+  );
+  assert.match(task, /Run 2 of 3/);
+  assert.ok(task.includes("http://fixture/?runId=exact&step=1"));
+  assert.ok(task.includes("Choose Business."));
+  assert.ok(task.includes("When finished, return only a JSON object with:"));
+  assert.doesNotMatch(task, /prowl_submit_report/);
+  assert.ok(
+    task.endsWith(
+      "Do not wrap the JSON in Markdown or include prose outside it.",
+    ),
+  );
+});
 
 const toolCall = (name = "browser_snapshot") => ({
   content: "",

@@ -11,9 +11,10 @@ Verify each submission using the visible confirmation. Capture any reference/ID 
 Stop and report a blocker if a submission fails or its outcome is uncertain; do not submit it again.
 Additional instructions: ${instructions || "None."}
 The application handles any remaining runs. Do not start another registration, even if earlier runs are mentioned.
-When finished, call the prowl_submit_report tool once, alone in its turn, with:
+When finished, return only a JSON object with:
 - "status": "confirmed" only after observing a visible success confirmation; otherwise "blocked" or "uncertain".
 - "summary": entered fields and observed outcome or blocker, as a nonblank string.
 - "evidence": literal visible confirmation text, required for "confirmed". Never invent confirmation evidence.
-- "reference": the exact reference/ID if shown; omit this field if none is shown.`;
+- "reference": the exact reference/ID if shown; omit this field if none is shown.
+Do not wrap the JSON in Markdown or include prose outside it.`;
 }
