@@ -1,5 +1,5 @@
 import type { TestContext } from "node:test";
-import type { OllamaMessage } from "#models/ollama.js";
+import type { OllamaMessage, OllamaTool } from "#models/ollama.js";
 
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -33,7 +33,8 @@ function fixture(t: TestContext, replies: Partial<OllamaMessage>[]) {
   const path = logger.filePath;
   t.after(() => configureLogger());
   const output = captureOutput(t);
-  const requests: Array<{ messages: OllamaMessage[] }> = [];
+  const requests: Array<{ messages: OllamaMessage[]; tools: OllamaTool[] }> =
+    [];
   const executed: string[] = [];
   t.mock.method(globalThis, "fetch", async (_url, options) => {
     requests.push(JSON.parse(options.body as string));
@@ -176,15 +177,168 @@ for (const content of [
   '{"status":"confirmed","summary":"Done","evidence":"   "}',
   '{"status":"unknown","summary":"Done","evidence":"Success"}',
 ]) {
-  test(`an invalid final report stops as uncertain: ${content}`, async (t) => {
-    const a = fixture(t, [{ content }]);
+  test(`an invalid final report stops as uncertain after bounded nudges: ${content}`, async (t) => {
+    const a = fixture(t, [{ content }, { content }, { content }]);
     await assert.rejects(a.run(), /Run 1\/3 uncertain/);
-    assert.equal(a.requests.length, 1);
+    assert.equal(a.requests.length, 3);
+    for (const request of a.requests.slice(1)) {
+      const nudge = request.messages.at(-1);
+      assert.equal(nudge?.role, "user");
+      assert.match(nudge?.content ?? "", /prowl_submit_report/);
+      assert.match(nudge?.content ?? "", /Do not repeat/);
+    }
+    assert.deepEqual(a.executed, []);
     assert.equal(
       a.records().find((record) => record.message === "Form runs summary").data
         .results[0].status,
       "uncertain",
     );
+  });
+}
+
+const reportCall = (args: Record<string, unknown>) => ({
+  content: "",
+  tool_calls: [{ function: { name: "prowl_submit_report", arguments: args } }],
+});
+
+for (const mode of ["auto", "full"] as const) {
+  test(`a report tool call ends the run without reaching MCP (${mode})`, async (t) => {
+    const a = fixture(t, [
+      toolCall(),
+      reportCall({
+        status: "confirmed",
+        summary: "Registered.",
+        evidence: "Registered successfully.",
+        reference: "REF-1",
+      }),
+    ]);
+    const summary = await a.run(1, 2, mode);
+    assert.deepEqual(a.executed, ["browser_snapshot"]);
+    assert.equal(summary.results[0].status, "confirmed");
+    assert.equal(summary.results[0].reference, "REF-1");
+    assert.ok(
+      a.requests[0].tools.some(
+        (tool) => tool.function.name === "prowl_submit_report",
+      ),
+    );
+  });
+}
+
+test("invalid report tool arguments return a tool error and the model can correct them", async (t) => {
+  const a = fixture(t, [
+    reportCall({ status: "confirmed", summary: "Registered." }),
+    reportCall({
+      status: "confirmed",
+      summary: "Registered.",
+      evidence: "Registered successfully.",
+    }),
+  ]);
+  const summary = await a.run(1, 2);
+  assert.equal(summary.results[0].status, "confirmed");
+  const receipt = a.requests[1].messages.at(-1);
+  assert.equal(receipt?.role, "tool");
+  assert.match(receipt?.content ?? "", /^Error: report rejected\..*evidence/s);
+  assert.equal(summary.iterationsUsed, 2);
+});
+
+test("a report batched with browser actions is rejected after the actions run", async (t) => {
+  const a = fixture(t, [
+    {
+      content: "",
+      tool_calls: [
+        {
+          function: {
+            name: "prowl_submit_report",
+            arguments: {
+              status: "confirmed",
+              summary: "Registered.",
+              evidence: "Registered successfully.",
+            },
+          },
+        },
+        { function: { name: "browser_snapshot", arguments: {} } },
+      ],
+    },
+    reportCall({
+      status: "confirmed",
+      summary: "Registered.",
+      evidence: "Registered successfully.",
+    }),
+  ]);
+  const summary = await a.run(1, 2);
+  assert.deepEqual(a.executed, ["browser_snapshot"]);
+  assert.equal(summary.results[0].status, "confirmed");
+  const receipts = a.requests[1].messages.filter(
+    (message) => message.role === "tool",
+  );
+  assert.match(
+    receipts[0].content,
+    /^Error: report rejected\..*only tool call/,
+  );
+});
+
+const hostileEvidence =
+  'Done! ```js\n{"status":"blocked"}\n``` — «Référence» {id: "Ω-7"}';
+
+for (const [label, content, expected] of [
+  [
+    "fenced",
+    '```json\n{"status":"confirmed","summary":"Ok","evidence":"Saved."}\n```',
+    { evidence: "Saved." },
+  ],
+  [
+    "untagged uppercase fence",
+    '```\n{"status":"Confirmed","summary":"Ok","evidence":"Saved."}\n```',
+    { evidence: "Saved." },
+  ],
+  [
+    "think tags",
+    '<think>Was it saved?\n{"status":"blocked"}</think>\n{"status":"confirmed","summary":"Ok","evidence":"Saved."}',
+    { evidence: "Saved." },
+  ],
+  [
+    "empty optional fields",
+    '{"status":"confirmed","summary":"Ok","evidence":"Saved.","reference":null}',
+    { evidence: "Saved." },
+  ],
+  [
+    "blank reference",
+    '{"status":"confirmed","summary":"Ok","evidence":"Saved.","reference":"  "}',
+    { evidence: "Saved." },
+  ],
+  [
+    "hostile evidence inside a fence",
+    "```json\n" +
+      JSON.stringify({
+        status: "confirmed",
+        summary: "Ok",
+        evidence: hostileEvidence,
+      }) +
+      "\n```",
+    { evidence: hostileEvidence },
+  ],
+] as const) {
+  test(`a text report is accepted when ${label}`, async (t) => {
+    const a = fixture(t, [{ content }]);
+    const summary = await a.run(1, 1);
+    const [result] = summary.results;
+    assert.equal(result.status, "confirmed");
+    assert.equal(result.evidence, expected.evidence);
+    assert.equal(result.reference, undefined);
+    assert.equal(a.requests.length, 1);
+  });
+}
+
+for (const content of [
+  'Here is the report:\n{"status":"confirmed","summary":"Ok","evidence":"Saved."}',
+  '```json\n{"status":"confirmed","summary":"Ok","evidence":"Saved."}\n```\nLet me know if you need more.',
+  '{"status":"success","summary":"Ok","evidence":"Saved."}',
+  '{"status":"blocked","summary":"Ok","evidence":"Saved.",}',
+]) {
+  test(`a text report outside the accepted shapes is never confirmed: ${content}`, async (t) => {
+    const a = fixture(t, [{ content }, { content }, { content }]);
+    await assert.rejects(a.run(1, 3), /Run 1\/1 uncertain/);
+    assert.equal(a.requests.length, 3);
   });
 }
 
@@ -305,4 +459,23 @@ test("normal run output shows confirmation evidence and reference IDs without ra
   assert.match(a.output.stdout, /DEMO-EXACT-123/);
   assert.doesNotMatch(a.output.stdout, /"status"\s*:/);
   assert.doesNotMatch(a.output.stderr, /"status"\s*:/);
+});
+
+test("rejected report receipts never become checkpointed confirmation evidence", async (t) => {
+  const a = fixture(t, [
+    reportCall({ status: "confirmed", summary: "Registered." }),
+    toolCall(),
+    toolCall(),
+    toolCall(),
+    reportCall({ status: "blocked", summary: "No confirmation shown." }),
+  ]);
+  await assert.rejects(a.run(1, 5), /Run 1\/1 blocked/);
+  const checkpoints = a.requests
+    .flatMap((request) => request.messages)
+    .filter((message) =>
+      message.content.includes("literalConfirmationEvidence"),
+    );
+  assert.ok(checkpoints.length, "History must compact to exercise checkpoints");
+  for (const message of checkpoints)
+    assert.doesNotMatch(message.content, /report rejected|"confirmed"/);
 });

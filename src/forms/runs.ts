@@ -1,4 +1,9 @@
-import type { AgentClient, AgentSession } from "#agent/loop.js";
+import type {
+  AgentClient,
+  AgentFinish,
+  AgentSession,
+  FinishResult,
+} from "#agent/loop.js";
 import type { ResolvedContextOptions } from "#agent/context/options.js";
 
 import { z } from "zod";
@@ -6,7 +11,7 @@ import { logger } from "#logger.js";
 import { runAgent } from "#agent/loop.js";
 import { formTask } from "#forms/prompts.js";
 
-export type FormRunResult = z.infer<typeof reportSchema> & { runIndex: number };
+export type FormRunResult = z.infer<typeof reportFields> & { runIndex: number };
 
 interface BatchOptions {
   url: string;
@@ -24,14 +29,97 @@ interface BatchSummary {
   results: FormRunResult[];
 }
 
-const reportSchema = z
-  .object({
-    status: z.enum(["confirmed", "blocked", "uncertain"]),
-    summary: z.string().trim().min(1),
-    evidence: z.string().trim().min(1).optional(),
-    reference: z.string().trim().min(1).optional(),
-  })
-  .refine((report) => report.status !== "confirmed" || !!report.evidence);
+const REPORT_TOOL = "prowl_submit_report";
+
+const reportFields = z.object({
+  status: z
+    .enum(["confirmed", "blocked", "uncertain"])
+    .describe(
+      '"confirmed" only after observing a visible success confirmation; otherwise "blocked" or "uncertain".',
+    ),
+  summary: z
+    .string()
+    .trim()
+    .min(1)
+    .describe("Entered fields and observed outcome or blocker."),
+  evidence: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe(
+      'Literal visible confirmation text, required for "confirmed". Never invent it.',
+    ),
+  reference: z
+    .string()
+    .trim()
+    .min(1)
+    .optional()
+    .describe("The exact reference/ID if shown; omit it if none is shown."),
+});
+
+const reportSchema = z.preprocess(
+  normalizeReport,
+  reportFields.refine(
+    (report) => report.status !== "confirmed" || !!report.evidence,
+    { message: 'evidence is required when status is "confirmed".' },
+  ),
+);
+
+const reportTool = {
+  type: "function" as const,
+  function: {
+    name: REPORT_TOOL,
+    description:
+      "Submit the final outcome of this registration after verifying it in the browser. Call it once, alone in its turn. It ends the run.",
+    parameters: z.toJSONSchema(reportFields),
+  },
+};
+
+// Models differ in how they spell "absent"; none of these rewrites can create a confirmation.
+function normalizeReport(value: unknown) {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return value;
+  const report: Record<string, unknown> = { ...value };
+  if (typeof report.status === "string")
+    report.status = report.status.trim().toLowerCase();
+  for (const field of ["evidence", "reference"]) {
+    const text = report[field];
+    if (text === null || (typeof text === "string" && !text.trim()))
+      delete report[field];
+  }
+  return report;
+}
+
+// Report text may quote any page, so only a fence spanning the whole response is removed.
+function extractReportText(content: string) {
+  const text = content
+    .replace(/^\s*(?:<think>[\s\S]*?<\/think>\s*)+/, "")
+    .trim();
+  const fenced = /^(```|~~~)[\w-]*[ \t]*\n([\s\S]*)\n[ \t]*\1$/.exec(text);
+  return fenced ? fenced[2] : text;
+}
+
+function acceptReport(value: unknown): FinishResult {
+  const parsed = reportSchema.safeParse(value);
+  return parsed.success
+    ? { report: JSON.stringify(parsed.data) }
+    : { error: z.prettifyError(parsed.error) };
+}
+
+const reportFinish: AgentFinish = {
+  tool: reportTool,
+  acceptArguments: acceptReport,
+  acceptText(content) {
+    try {
+      return acceptReport(JSON.parse(extractReportText(content)));
+    } catch {
+      return {
+        error: `The response was not a JSON report. Call ${REPORT_TOOL} instead.`,
+      };
+    }
+  },
+};
 
 function parseReport(content: string, runIndex: number): FormRunResult {
   try {
@@ -105,7 +193,7 @@ export async function runBatch(client: AgentClient, options: BatchOptions) {
       const report = await runAgent(
         client,
         formTask(url, runs, instructions, runIndex),
-        { model, baseUrl, maxIterations, context },
+        { model, baseUrl, maxIterations, context, finish: reportFinish },
         session,
       );
       result = parseReport(report, runIndex);

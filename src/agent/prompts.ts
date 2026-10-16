@@ -16,3 +16,7 @@ For unfamiliar forms:
 
 export const emptyResponseRecovery =
   "Your response contained no tool calls or final report. Continue the task using the available tools, or provide a final report describing the observed outcome or blocker. Do not repeat a submission whose outcome is uncertain.";
+
+export const reportRecovery = (tool: string, error: string) =>
+  `Your final report was not accepted: ${error}
+Call ${tool} with the outcome you already observed. Do not repeat any browser action or submission.`;
