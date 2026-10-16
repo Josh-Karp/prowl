@@ -10,6 +10,7 @@ import type { ResolvedModelOptions } from "#models/options.js";
 
 import { chat, mcpToolsToOllamaTools } from "#models/ollama.js";
 import {
+  beforeObservationRecovery,
   emptyResponseRecovery,
   reportRecovery,
   system,
@@ -20,7 +21,10 @@ import {
   dispatchContextTool,
 } from "#agent/context/tools.js";
 import { logger } from "#logger.js";
-import { BrowserContext } from "#agent/context/observations.js";
+import {
+  BrowserContext,
+  hasPageSnapshot,
+} from "#agent/context/observations.js";
 import { ConversationHistory } from "#agent/context/history.js";
 import { ContextArtifacts } from "#agent/context/artifacts.js";
 import { resolveContextOptions } from "#agent/context/options.js";
@@ -79,13 +83,11 @@ function createConversation(
   task: string,
   context: ResolvedContextOptions,
   session: AgentSession,
-  finish?: AgentFinish,
 ) {
   const automatic = context.mode === "auto";
   const ollamaTools = [
     ...mcpToolsToOllamaTools(tools),
     ...(automatic ? contextTools : []),
-    ...(finish ? [finish.tool] : []),
   ];
 
   const prefix: OllamaMessage[] = [
@@ -221,6 +223,8 @@ async function executeTool(
     content: JSON.stringify(displayed),
   };
   return {
+    observedBrowser:
+      name !== "prowl_browser_history" && hasPageSnapshot(displayed),
     receipt: displayedReceipt,
     originalReceipt: history
       ? { ...displayedReceipt, content: JSON.stringify(result) }
@@ -267,7 +271,8 @@ export async function runAgent(
 
   const tools = await discoverTools(client);
   const { ollamaTools, browser, history, prepareMessages, appendTurn } =
-    createConversation(client, tools, task, context, session, finish);
+    createConversation(client, tools, task, context, session);
+  let hasBrowserObservation = false;
   let previousPromptTokens: number | undefined;
   let consecutiveEmptyResponses = 0;
   let rejectedTextReports = 0;
@@ -292,7 +297,9 @@ export async function runAgent(
     previousPromptTokens = undefined;
     const response = await requestModelResponse(
       messages,
-      ollamaTools,
+      hasBrowserObservation && finish
+        ? [...ollamaTools, finish.tool]
+        : ollamaTools,
       modelOptions,
       (metrics) => {
         previousPromptTokens = metrics.prompt_eval_count;
@@ -336,7 +343,10 @@ export async function runAgent(
         continue;
       }
 
-      const text = finish?.acceptText(response.content);
+      const needsObservation = !!finish && !hasBrowserObservation;
+      const text = needsObservation
+        ? { error: beforeObservationRecovery }
+        : finish?.acceptText(response.content);
       if (
         finish &&
         text &&
@@ -351,7 +361,9 @@ export async function runAgent(
         );
         const recovery: OllamaMessage = {
           role: "user",
-          content: reportRecovery(finish.tool.function.name, text.error),
+          content: needsObservation
+            ? beforeObservationRecovery
+            : reportRecovery(finish.tool.function.name, text.error),
         };
         turn.push(recovery);
         originalTurn.push(recovery);
@@ -360,6 +372,10 @@ export async function runAgent(
       }
 
       appendTurn(turn, originalTurn);
+      if (needsObservation)
+        throw new Error(
+          "Model reported before receiving a browser observation.",
+        );
       // An exhausted rejection returns the raw text so the caller records it as unaccepted.
       return finished(
         text && "report" in text ? text.report : response.content,
@@ -375,7 +391,9 @@ export async function runAgent(
         // A report must describe verified state, so it cannot share a turn with actions.
         const result: FinishResult =
           response.tool_calls.length === 1
-            ? finish.acceptArguments(toolCall.function.arguments ?? {})
+            ? hasBrowserObservation
+              ? finish.acceptArguments(toolCall.function.arguments ?? {})
+              : { error: beforeObservationRecovery }
             : {
                 error: `${finishName} must be the only tool call in its turn. Verify the current page, then call it again alone.`,
               };
@@ -397,7 +415,7 @@ export async function runAgent(
         `Executing tool ${toolIndex + 1}/${response.tool_calls.length}: ${toolCall.function.name}`,
         { console: true },
       );
-      const { receipt, originalReceipt } = await executeTool(
+      const { receipt, originalReceipt, observedBrowser } = await executeTool(
         client,
         toolCall,
         browser,
@@ -405,6 +423,7 @@ export async function runAgent(
       );
       turn.push(receipt);
       originalTurn.push(originalReceipt);
+      hasBrowserObservation ||= observedBrowser;
       logger.debug(
         `Added ${toolCall.function.name} result to conversation (${messages.length + turn.length} messages)`,
       );

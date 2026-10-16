@@ -35,7 +35,10 @@ test("preserves tool conversation and logs full payloads while showing concise p
   const output = captureOutput(t);
   const originalLimit = process.env.MAX_ITERATIONS;
   process.env.MAX_ITERATIONS = "2";
-  const requests: Array<{ messages: Array<Record<string, unknown>> }> = [];
+  const requests: Array<{
+    messages: Array<Record<string, unknown>>;
+    tools: Array<{ function: { name: string } }>;
+  }> = [];
   const toolCalls = [
     {
       function: {
@@ -88,6 +91,11 @@ test("preserves tool conversation and logs full payloads while showing concise p
     });
     assert.equal(existsSync(join(dirname(path), "history.jsonl")), false);
     assert.equal(requests.length, 2);
+    for (const request of requests)
+      assert.deepEqual(
+        request.tools.map((tool) => tool.function.name),
+        ["browser_navigate"],
+      );
     assert.deepEqual(requests[1].messages[2], {
       role: "assistant",
       content: "",

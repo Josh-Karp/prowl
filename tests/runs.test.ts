@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { runBatch } from "#forms/runs.js";
 import { formTask } from "#forms/prompts.js";
+import { page, textResult } from "#tests/fixtures/context.js";
 import { configureLogger, logger } from "#logger.js";
 import {
   temporaryDirectory,
@@ -74,14 +75,7 @@ function fixture(t: TestContext, replies: Partial<OllamaMessage>[]) {
     }),
     callTool: async ({ name }: { name: string }) => {
       executed.push(name);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `### Snapshot\n- status: observation-${executed.length}`,
-          },
-        ],
-      };
+      return page(`- status: observation-${executed.length}`);
     },
   };
   return {
@@ -170,7 +164,9 @@ for (const mode of ["auto", "full"] as const) {
 for (const status of ["blocked", "uncertain"]) {
   test(`a ${status} second run stops without a replacement`, async (t) => {
     const a = fixture(t, [
+      toolCall(),
       confirmed("ONE"),
+      toolCall(),
       {
         content: JSON.stringify({
           status,
@@ -179,7 +175,7 @@ for (const status of ["blocked", "uncertain"]) {
       },
     ]);
     await assert.rejects(a.run(), new RegExp(`Run 2/3 ${status}`));
-    assert.equal(a.requests.length, 2);
+    assert.equal(a.requests.length, 4);
     const summary = a
       .records()
       .find((record) => record.message === "Form runs summary").data;
@@ -187,7 +183,7 @@ for (const status of ["blocked", "uncertain"]) {
       summary.results.map((result: { status: string }) => result.status),
       ["confirmed", status],
     );
-    assert.equal(summary.iterationsUsed, 2);
+    assert.equal(summary.iterationsUsed, 4);
   });
 }
 
@@ -198,16 +194,16 @@ for (const content of [
   '{"status":"unknown","summary":"Done","evidence":"Success"}',
 ]) {
   test(`an invalid final report stops as uncertain after bounded nudges: ${content}`, async (t) => {
-    const a = fixture(t, [{ content }, { content }, { content }]);
+    const a = fixture(t, [toolCall(), { content }, { content }, { content }]);
     await assert.rejects(a.run(), /Run 1\/3 uncertain/);
-    assert.equal(a.requests.length, 3);
-    for (const request of a.requests.slice(1)) {
+    assert.equal(a.requests.length, 4);
+    for (const request of a.requests.slice(2)) {
       const nudge = request.messages.at(-1);
       assert.equal(nudge?.role, "user");
       assert.match(nudge?.content ?? "", /prowl_submit_report/);
       assert.match(nudge?.content ?? "", /Do not repeat/);
     }
-    assert.deepEqual(a.executed, []);
+    assert.deepEqual(a.executed, ["browser_snapshot"]);
     assert.equal(
       a.records().find((record) => record.message === "Form runs summary").data
         .results[0].status,
@@ -219,6 +215,113 @@ for (const content of [
 const reportCall = (args: Record<string, unknown>) => ({
   content: "",
   tool_calls: [{ function: { name: "prowl_submit_report", arguments: args } }],
+});
+
+const hasReportTool = (request: { tools: OllamaTool[] }) =>
+  request.tools.some((tool) => tool.function.name === "prowl_submit_report");
+
+for (const mode of ["auto", "full"] as const) {
+  for (const status of ["confirmed", "blocked", "uncertain"]) {
+    test(`an early ${status} text report requires a browser observation (${mode})`, async (t) => {
+      const a = fixture(t, [
+        {
+          content: JSON.stringify({
+            status,
+            summary: "Unsupported page claim.",
+            evidence: "Unobserved evidence.",
+          }),
+        },
+        toolCall(),
+        confirmed("OBSERVED"),
+      ]);
+      const summary = await a.run(1, 3, mode);
+      assert.equal(summary.results[0].reference, "OBSERVED");
+      assert.deepEqual(a.requests.map(hasReportTool), [false, false, true]);
+      assert.match(
+        a.requests[1].messages.at(-1)?.content ?? "",
+        /No browser observation.*Navigate.*inspect/s,
+      );
+    });
+  }
+
+  for (const maxIterations of [1, 3]) {
+    test(`early valid JSON cannot bypass exhausted observation recovery (${mode}, ${maxIterations})`, async (t) => {
+      const a = fixture(t, [
+        confirmed("EARLY"),
+        confirmed("EARLY"),
+        confirmed("EARLY"),
+      ]);
+      await assert.rejects(
+        a.run(2, maxIterations, mode),
+        /Model reported before receiving a browser observation/,
+      );
+      assert.equal(a.requests.length, maxIterations);
+      assert.deepEqual(a.executed, []);
+      const summary = a
+        .records()
+        .find((r) => r.message === "Form runs summary").data;
+      assert.deepEqual(
+        summary.results.map((r: { status: string }) => r.status),
+        ["uncertain"],
+      );
+    });
+  }
+
+  test(`an unadvertised report is rejected locally until a snapshot arrives (${mode})`, async (t) => {
+    const args = {
+      status: "confirmed",
+      summary: "Registered.",
+      evidence: "Saved.",
+    };
+    const a = fixture(t, [reportCall(args), toolCall(), reportCall(args)]);
+    await a.run(1, 3, mode);
+    assert.deepEqual(a.requests.map(hasReportTool), [false, false, true]);
+    assert.match(
+      a.requests[1].messages.at(-1)?.content ?? "",
+      /No browser observation/,
+    );
+    assert.deepEqual(a.executed, ["browser_snapshot"]);
+  });
+
+  for (const [name, result] of [
+    ["browser_snapshot", { ...page("- status: failure"), isError: true }],
+    ["browser_snapshot", textResult("### Snapshot\n[Snapshot](page.yml)")],
+    ["prowl_browser_history", page("- status: historical")],
+  ] as const) {
+    test(`an unsuccessful or historical ${name} result does not unlock reporting (${mode}, ${JSON.stringify(result)})`, async (t) => {
+      const a = fixture(t, [toolCall(name), toolCall(), confirmed("OBSERVED")]);
+      let returned = false;
+      t.mock.method(a.client, "callTool", async (call) => {
+        if (call.name === name && !returned) {
+          returned = true;
+          return result;
+        }
+        return page("- status: fresh observation");
+      });
+      await a.run(1, 3, mode);
+      assert.deepEqual(a.requests.map(hasReportTool), [false, false, true]);
+    });
+  }
+}
+
+test("an empty fresh snapshot permits reporting an empty-page blocker", async (t) => {
+  const a = fixture(t, [
+    toolCall(),
+    reportCall({ status: "blocked", summary: "The page is empty." }),
+  ]);
+  t.mock.method(a.client, "callTool", async () => page(""));
+  await assert.rejects(a.run(1, 2), /Run 1\/1 blocked/);
+  assert.deepEqual(a.requests.map(hasReportTool), [false, true]);
+});
+
+test("a local full snapshot unlocks reporting", async (t) => {
+  const a = fixture(t, [
+    toolCall("prowl_full_snapshot"),
+    confirmed("OBSERVED"),
+  ]);
+  await a.run(1, 2);
+  assert.deepEqual(a.requests.map(hasReportTool), [false, true]);
+  assert.deepEqual(a.executed, ["browser_snapshot"]);
 });
 
 for (const mode of ["auto", "full"] as const) {
@@ -236,16 +339,13 @@ for (const mode of ["auto", "full"] as const) {
     assert.deepEqual(a.executed, ["browser_snapshot"]);
     assert.equal(summary.results[0].status, "confirmed");
     assert.equal(summary.results[0].reference, "REF-1");
-    assert.ok(
-      a.requests[0].tools.some(
-        (tool) => tool.function.name === "prowl_submit_report",
-      ),
-    );
+    assert.deepEqual(a.requests.map(hasReportTool), [false, true]);
   });
 }
 
 test("invalid report tool arguments return a tool error and the model can correct them", async (t) => {
   const a = fixture(t, [
+    toolCall(),
     reportCall({ status: "confirmed", summary: "Registered." }),
     reportCall({
       status: "confirmed",
@@ -253,49 +353,61 @@ test("invalid report tool arguments return a tool error and the model can correc
       evidence: "Registered successfully.",
     }),
   ]);
-  const summary = await a.run(1, 2);
+  const summary = await a.run(1, 3);
   assert.equal(summary.results[0].status, "confirmed");
-  const receipt = a.requests[1].messages.at(-1);
+  const receipt = a.requests[2].messages.at(-1);
   assert.equal(receipt?.role, "tool");
   assert.match(receipt?.content ?? "", /^Error: report rejected\..*evidence/s);
-  assert.equal(summary.iterationsUsed, 2);
+  assert.equal(summary.iterationsUsed, 3);
 });
 
-test("a report batched with browser actions is rejected after the actions run", async (t) => {
-  const a = fixture(t, [
-    {
-      content: "",
-      tool_calls: [
-        {
-          function: {
-            name: "prowl_submit_report",
-            arguments: {
-              status: "confirmed",
-              summary: "Registered.",
-              evidence: "Registered successfully.",
-            },
-          },
-        },
-        { function: { name: "browser_snapshot", arguments: {} } },
-      ],
-    },
-    reportCall({
-      status: "confirmed",
-      summary: "Registered.",
-      evidence: "Registered successfully.",
-    }),
-  ]);
-  const summary = await a.run(1, 2);
-  assert.deepEqual(a.executed, ["browser_snapshot"]);
-  assert.equal(summary.results[0].status, "confirmed");
-  const receipts = a.requests[1].messages.filter(
-    (message) => message.role === "tool",
-  );
-  assert.match(
-    receipts[0].content,
-    /^Error: report rejected\..*only tool call/,
-  );
-});
+for (const reportFirst of [true, false]) {
+  test(`a report batched with browser actions is rejected (report first: ${reportFirst})`, async (t) => {
+    const a = fixture(t, [
+      {
+        content: "",
+        tool_calls: reportFirst
+          ? [
+              {
+                function: {
+                  name: "prowl_submit_report",
+                  arguments: {
+                    status: "confirmed",
+                    summary: "Registered.",
+                    evidence: "Registered successfully.",
+                  },
+                },
+              },
+              { function: { name: "browser_snapshot", arguments: {} } },
+            ]
+          : [
+              { function: { name: "browser_snapshot", arguments: {} } },
+              reportCall({
+                status: "confirmed",
+                summary: "Registered.",
+                evidence: "Registered successfully.",
+              }).tool_calls[0],
+            ],
+      },
+      reportCall({
+        status: "confirmed",
+        summary: "Registered.",
+        evidence: "Registered successfully.",
+      }),
+    ]);
+    const summary = await a.run(1, 2);
+    assert.deepEqual(a.executed, ["browser_snapshot"]);
+    assert.equal(summary.results[0].status, "confirmed");
+    const receipts = a.requests[1].messages.filter(
+      (message) => message.role === "tool",
+    );
+    assert.match(
+      receipts.find((receipt) => receipt.tool_name === "prowl_submit_report")!
+        .content,
+      /^Error: report rejected\..*only tool call/,
+    );
+  });
+}
 
 const hostileEvidence =
   'Done! ```js\n{"status":"blocked"}\n``` — «Référence» {id: "Ω-7"}';
@@ -339,13 +451,13 @@ for (const [label, content, expected] of [
   ],
 ] as const) {
   test(`a text report is accepted when ${label}`, async (t) => {
-    const a = fixture(t, [{ content }]);
-    const summary = await a.run(1, 1);
+    const a = fixture(t, [toolCall(), { content }]);
+    const summary = await a.run(1, 2);
     const [result] = summary.results;
     assert.equal(result.status, "confirmed");
     assert.equal(result.evidence, expected.evidence);
     assert.equal(result.reference, undefined);
-    assert.equal(a.requests.length, 1);
+    assert.equal(a.requests.length, 2);
   });
 }
 
@@ -356,22 +468,28 @@ for (const content of [
   '{"status":"blocked","summary":"Ok","evidence":"Saved.",}',
 ]) {
   test(`a text report outside the accepted shapes is never confirmed: ${content}`, async (t) => {
-    const a = fixture(t, [{ content }, { content }, { content }]);
-    await assert.rejects(a.run(1, 3), /Run 1\/1 uncertain/);
-    assert.equal(a.requests.length, 3);
+    const a = fixture(t, [toolCall(), { content }, { content }, { content }]);
+    await assert.rejects(a.run(1, 4), /Run 1\/1 uncertain/);
+    assert.equal(a.requests.length, 4);
   });
 }
 
 test("all runs share the iteration budget, including empty-response recovery", async (t) => {
-  const a = fixture(t, [{}, confirmed("ONE"), {}, confirmed("MUST-NOT-RUN")]);
-  await assert.rejects(a.run(3, 3), /Agent exceeded maximum iterations/);
-  assert.equal(a.requests.length, 3);
+  const a = fixture(t, [
+    {},
+    toolCall(),
+    confirmed("ONE"),
+    {},
+    confirmed("MUST-NOT-RUN"),
+  ]);
+  await assert.rejects(a.run(3, 4), /Agent exceeded maximum iterations/);
+  assert.equal(a.requests.length, 4);
   assert.equal(a.requests[1].messages.at(-1)?.role, "user");
-  assert.equal(a.requests[2].messages.length, 2);
+  assert.equal(a.requests[3].messages.length, 2);
   const summary = a
     .records()
     .find((record) => record.message === "Form runs summary").data;
-  assert.equal(summary.iterationsUsed, 3);
+  assert.equal(summary.iterationsUsed, 4);
   assert.deepEqual(
     summary.results.map((result: { status: string }) => result.status),
     ["confirmed", "uncertain"],
@@ -379,9 +497,9 @@ test("all runs share the iteration budget, including empty-response recovery", a
 });
 
 test("a spent budget cannot start the next run", async (t) => {
-  const a = fixture(t, [confirmed("ONE")]);
-  await assert.rejects(a.run(3, 1), /Agent exceeded maximum iterations/);
-  assert.equal(a.requests.length, 1);
+  const a = fixture(t, [toolCall(), confirmed("ONE")]);
+  await assert.rejects(a.run(3, 2), /Agent exceeded maximum iterations/);
+  assert.equal(a.requests.length, 2);
   assert.equal(
     a.records().filter((record) => record.message === "Form run started")
       .length,
@@ -428,9 +546,10 @@ test("compacted checkpoints from one run never enter the next conversation", asy
     toolCall(),
     toolCall(),
     confirmed("ONE"),
+    toolCall(),
     confirmed("TWO"),
   ]);
-  await a.run(2, 5);
+  await a.run(2, 6);
   assert.ok(
     a
       .records()
@@ -440,6 +559,14 @@ test("compacted checkpoints from one run never enter the next conversation", asy
       ),
   );
   assert.equal(a.requests[4].messages.length, 2);
+  assert.deepEqual(a.requests.map(hasReportTool), [
+    false,
+    true,
+    true,
+    true,
+    false,
+    true,
+  ]);
   assert.doesNotMatch(
     JSON.stringify(a.requests[4].messages),
     /observation-|Reference ID: ONE/,
@@ -447,8 +574,10 @@ test("compacted checkpoints from one run never enter the next conversation", asy
 });
 
 test("MCP failure retains prior results and never starts another run", async (t) => {
-  const a = fixture(t, [confirmed("ONE"), toolCall()]);
+  const a = fixture(t, [toolCall(), confirmed("ONE"), toolCall()]);
+  let calls = 0;
   t.mock.method(a.client, "callTool", async () => {
+    if (++calls === 1) return page("- status: observed");
     throw Error("Browser disconnected");
   });
   await assert.rejects(a.run(), /Browser disconnected/);
@@ -460,11 +589,12 @@ test("MCP failure retains prior results and never starts another run", async (t)
     ["confirmed", "uncertain"],
   );
   assert.equal(summary.results[1].summary, "Browser disconnected");
-  assert.equal(a.requests.length, 2);
+  assert.equal(a.requests.length, 3);
 });
 
 test("normal run output shows confirmation evidence and reference IDs without raw JSON", async (t) => {
   const a = fixture(t, [
+    toolCall(),
     {
       content: JSON.stringify({
         status: "confirmed",
@@ -474,7 +604,7 @@ test("normal run output shows confirmation evidence and reference IDs without ra
       }),
     },
   ]);
-  await a.run(1, 1);
+  await a.run(1, 2);
   assert.match(a.output.stdout, /Customer registered successfully\./);
   assert.match(a.output.stdout, /DEMO-EXACT-123/);
   assert.doesNotMatch(a.output.stdout, /"status"\s*:/);

@@ -67,6 +67,10 @@ function parseSnapshot(
   return matches.length === 1 ? { content, tree: matches[0][1] } : null;
 }
 
+export function hasPageSnapshot(result: BrowserResult): boolean {
+  return parseSnapshot(result) !== null;
+}
+
 function parseNativeFormResult(result: BrowserResult): NativeForm | null {
   if (result.isError) return null;
   const match = readTextContent(result)

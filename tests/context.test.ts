@@ -2,7 +2,10 @@ import type { CallToolResult } from "@modelcontextprotocol/client";
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BrowserContext } from "#agent/context/observations.js";
+import {
+  BrowserContext,
+  hasPageSnapshot,
+} from "#agent/context/observations.js";
 import {
   capabilities,
   textResult,
@@ -12,6 +15,25 @@ import {
   native,
   tool,
 } from "#tests/fixtures/context.js";
+
+test("recognizes only one successful inline page snapshot, including an empty page", () => {
+  assert.equal(hasPageSnapshot(page(compactTree)), true);
+  assert.equal(hasPageSnapshot(page("")), true);
+  for (const result of [
+    { ...page(compactTree), isError: true },
+    textResult("Action completed."),
+    textResult("### Snapshot\n[Snapshot](page.yml)"),
+    textResult("### Snapshot\n```yaml\nunterminated"),
+    { content: [...page(compactTree).content, ...page(compactTree).content] },
+    {
+      content: [
+        ...page(compactTree).content,
+        { type: "image" as const, data: "opaque", mimeType: "image/png" },
+      ],
+    },
+  ])
+    assert.equal(hasPageSnapshot(result), false);
+});
 
 function fixture(before = native, after = before, scoped = page(compactTree)) {
   const calls: Array<{ name: string; arguments?: Record<string, unknown> }> =

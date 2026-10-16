@@ -56,7 +56,7 @@ pnpm prowl run 'https://example.com/register?source=trial' \
   --instructions 'Use different synthetic customer details each time'
 ```
 
-`--runs` requests sequential registrations. Each starts a fresh model conversation, while all runs share one iteration budget. Prowl stops if a run is blocked or uncertain. The model interprets visible confirmation, so review its evidence when assessing a result.
+`--runs` requests sequential registrations. Each starts a fresh model conversation, while all runs share one iteration budget. Reporting requires a fresh inline browser snapshot for the current registration; the report tool becomes available after that observation. Reports returned before an observation are rejected within the existing iteration and recovery limits. A snapshot file link or historical observation does not satisfy this requirement. Prowl stops if a run is blocked or uncertain. The model interprets visible confirmation, so review its evidence when assessing a result.
 
 Override the model, Ollama service, or shared iteration limit when needed:
 
