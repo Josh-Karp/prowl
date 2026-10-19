@@ -57,15 +57,15 @@
   "dependencies": {
     "@modelcontextprotocol/client": "2.3.1",
     "commander": "15.0.0",
-    "dotenv": "^18.0.7",
-    "zod": "4.6.6"
+    "dotenv": "^18.0.8",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.3",
     "@commitlint/config-conventional": "21.2.3",
     "@eslint/js": "10.0.1",
     "@types/node": "latest",
-    "eslint": "10.12.0",
+    "eslint": "10.13.0",
     "eslint-config-prettier": "10.1.8",
     "globals": "17.13.0",
     "husky": "9.1.7",
@@ -73,6 +73,6 @@
     "prettier": "3.9.10",
     "tsx": "latest",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.71.1"
+    "typescript-eslint": "8.71.2"
   }
 }
