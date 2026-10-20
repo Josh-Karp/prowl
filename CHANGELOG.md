@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/Josh-Karp/prowl/compare/v0.3.0...v0.3.1) (2026-10-20)
+
+
+### Bug Fixes
+
+* **deps:** bump the all-dependencies group with 4 updates ([#24](https://github.com/Josh-Karp/prowl/issues/24)) ([ec1e33f](https://github.com/Josh-Karp/prowl/commit/ec1e33f1798b8996f5686ea9698469b2bdd4270e))
+
 ## [0.3.0](https://github.com/Josh-Karp/prowl/compare/v0.2.0...v0.3.0) (2026-10-15)
 
 
